@@ -1,0 +1,205 @@
+/* FavoriteButton.css */
+.favoritebuttoncontainer {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.favoritebtn {
+  border: none;
+  background: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  padding: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1.5px solid #e5e7eb;
+}
+
+.favoritebtn:hover:not(:disabled) {
+  transform: scale(1.1);
+}
+
+.favoritebtn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.favoritebtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.favoritebtn-liked {
+  background: #fee2e2;
+  border-color: #ef4444;
+  animation: favoritepulse 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.favoritebtn-unliked {
+  background: white;
+  border-color: #0b44b4;
+}
+
+.favoritebtn-unliked:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #d1d5db;
+}
+
+.favoritebtn-sm {
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+}
+
+.favoritebtn-md {
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+}
+
+.favoritebtn-lg {
+  width: 48px;
+  height: 48px;
+  padding: 10px;
+}
+
+.favoriteicon {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.favoriteicon-loading {
+  animation: favoritespin 1s linear infinite;
+}
+
+.favoritecount {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  min-width: 20px;
+}
+
+.favoriteloginprompt {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  z-index: 1000;
+  animation: favoritefadein 0.3s ease;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  min-width: 200px;
+  text-align: center;
+}
+
+.favoriteloginpromptcontent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.favoriteloginprompttext {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.favoriteloginpromptloginbtn {
+  background: white;
+  color: #2563eb;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.favoriteloginpromptloginbtn:hover {
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.favoriteloginpromptclosebtn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.favoriteloginpromptclosebtn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes favoritepulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes favoritespin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes favoritefadein {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  .favoritebtn {
+    background: #1f2937;
+    border-color: #374151;
+  }
+  
+  .favoritebtn-unliked {
+    background: #1f2937;
+  }
+  
+  .favoritebtn-unliked:hover:not(:disabled) {
+    background: #374151;
+    border-color: #4b5563;
+  }
+  
+  .favoritecount {
+    color: #f9fafb;
+  }
+}
