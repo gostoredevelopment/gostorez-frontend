@@ -819,7 +819,7 @@ const VendorDashboard: React.FC = () => {
         </button>
         <button 
           className="vendash-nav-item-button"
-          onClick={() => navigate('/marketplace')}
+          onClick={() => navigate('/market')}
         >
           <ShoppingBag size={18} />
         </button>
