@@ -37,7 +37,7 @@
   100% { transform: rotate(360deg); }
 }
 
-/* Header - EXACTLY like other pages */
+/* Header */
 .vendash-header-main {
   position: fixed;
   top: 0;
@@ -85,7 +85,6 @@
   font-weight: 500;
 }
 
-/* Title center */
 .vendash-header-title {
   font-size: 11px;
   font-weight: 700;
@@ -100,7 +99,6 @@
   transform: translateX(-50%);
 }
 
-/* Header buttons - Notification, Settings, Back */
 .vendash-header-actions {
   display: flex;
   align-items: center;
@@ -118,6 +116,23 @@
   color: white;
   width: 20px;
   height: 20px;
+  position: relative;
+}
+
+.vendash-notification-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #dc2626;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Main content layout */
@@ -130,12 +145,13 @@
   overflow-y: auto;
   min-height: 0;
   width: 100%;
+  padding: 0;
 }
 
 /* Shop Background Image Section */
 .vendash-shop-background-section {
   position: relative;
-  min-height: 120px;
+  min-height: 100px;
   width: 100%;
   overflow: hidden;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -155,30 +171,35 @@
 
 .vendash-shop-overlay-content {
   position: relative;
-  padding: 12px 8px;
+  padding: 8px;
   background: linear-gradient(transparent, rgba(0,0,0,0.3));
 }
 
-/* Shop Identity - White background to contrast with background image */
+/* Shop Identity Card - Aligned to left */
 .vendash-shop-identity-card {
-  padding: 12px 8px;
-  background: rgba(255, 255, 255, 0);
-  width: 100%;
-  border-radius: 8px;
-  margin-bottom: 3px;
+  padding: 8px; /* Increased for better visibility */
+  background: rgba(255, 255, 255, 0.096); /* More transparent */
+  border-radius: 6px;
+  margin-left: auto; 
+  margin-left: 0;
+  max-width: fit-content;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);  
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px); /* Safari prefix */
+  margin: 30px 30px 30px 0px;
 }
 
 .vendash-shop-header-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .vendash-shop-logo-wrapper {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
 }
 
@@ -186,31 +207,30 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   
-  background: white;
 }
 
 .vendash-shop-logo-fallback {
   width: 100%;
   height: 100%;
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(135deg, #9B4819, #ff7e5f);
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: bold;
-  border: 2px solid #9B4819;
+  border: 1px solid #9B4819;
 }
 
 .vendash-switch-shop-button {
   position: absolute;
-  bottom: -4px;
-  right: -4px;
-  width: 18px;
-  height: 18px;
+  bottom: -3px;
+  right: -3px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #9B4819;
   border: 1px solid white;
@@ -220,18 +240,19 @@
   justify-content: center;
   cursor: pointer;
   padding: 0;
+  font-size: 10px;
 }
 
 .vendash-shop-info-details {
   flex: 1;
   min-width: 0;
   background: #f9f1eb;
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 4px;
 }
 
 .vendash-shop-name-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: #333;
   margin: 0 0 2px 0;
@@ -241,28 +262,29 @@
 }
 
 .vendash-shop-bio-text {
-  font-size: 11px;
+  font-size: 10px;
   color: #666;
-  margin: 0 0 4px 0;
+  margin: 0 0 3px 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  line-height: 1.2;
 }
 
 .vendash-shop-location-row {
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
+  gap: 2px;
+  font-size: 9px;
   color: #999;
 }
 
+/* Shop Stats Grid - ADDED BACK */
 .vendash-shop-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 3px;
-  margin-top: 8px;
 }
 
 .vendash-shop-stat-item {
@@ -290,19 +312,19 @@
   text-align: center;
 }
 
-/* Balance Section - White background for contrast */
+/* Balance Overview Section - ADDED BACK */
 .vendash-balance-overview-section {
-  padding: 12px 8px;
+  padding: 8px;
   background: white;
   width: 100%;
-  border-radius: 8px;
+  border-radius: 6px;
   margin: 3px 0;
 }
 
 .vendash-section-title-heading {
   font-size: 10px;
   color: #666;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   padding-left: 2px;
   font-weight: 600;
   text-transform: uppercase;
@@ -325,7 +347,7 @@
   padding: 6px;
   background: #f9f1eb;
   border-radius: 4px;
-  min-height: 60px;
+  min-height: 50px;
 }
 
 .vendash-balance-card-pending {
@@ -345,8 +367,8 @@
 }
 
 .vendash-balance-icon-container {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -395,7 +417,7 @@
   color: #888;
 }
 
-/* Tabs Navigation - White background */
+/* Tabs Navigation */
 .vendash-tabs-navigation {
   background: white;
   display: flex;
@@ -403,8 +425,7 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
   padding: 0 3px;
-  border-radius: 8px;
-  margin: 3px 0;
+  border-bottom: 1px solid #e0d6cc;
 }
 
 .vendash-tabs-navigation::-webkit-scrollbar {
@@ -412,11 +433,11 @@
 }
 
 .vendash-tab-button {
-  padding: 8px 12px;
+  padding: 6px 8px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  font-size: 11px;
+  font-size: 10px;
   color: #666;
   cursor: pointer;
   white-space: nowrap;
@@ -424,6 +445,7 @@
   display: flex;
   align-items: center;
   gap: 3px;
+  position: relative;
 }
 
 .vendash-tab-button-active {
@@ -432,59 +454,608 @@
   font-weight: 600;
 }
 
-/* Tab Content - White background */
+.vendash-tab-notification {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #dc2626;
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Tab Content Area */
 .vendash-tab-content-area {
   flex: 1;
   overflow-y: auto;
   background: white;
   padding: 8px;
-  border-radius: 8px;
-  margin-bottom: 40px;
+  margin-bottom: 35px;
 }
 
-/* Overview Stats */
+/* Orders Tab */
+.vendash-order-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.vendash-order-stat-card {
+  padding: 4px;
+  background: #f9f1eb;
+  border-radius: 3px;
+  text-align: center;
+}
+
+/* Icon and text on same line */
+.vendash-order-stat-content-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #666;
+}
+
+.vendash-order-stat-content-inline span {
+  font-weight: 600;
+}
+
+.vendash-order-stat-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: #333;
+  margin: 0;
+  margin-left: 3px;
+}
+
+.vendash-orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vendash-order-item {
+  background: #f9f1eb;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #e0d6cc;
+}
+
+.vendash-order-header {
+  padding: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.vendash-order-title-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.vendash-order-product-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vendash-order-status-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 8px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+}
+
+.vendash-order-price-section {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.vendash-order-price {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9B4819;
+  margin: 0;
+}
+
+.vendash-order-quantity {
+  font-size: 9px;
+  color: #666;
+}
+
+.vendash-order-expand-icon {
+  color: #9B4819;
+}
+
+.vendash-order-details {
+  padding: 6px;
+  border-top: 1px solid #e0d6cc;
+  background: white;
+}
+
+/* Alternating row colors like Excel */
+.vendash-order-detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 10px;
+  padding: 3px;
+  border-radius: 2px;
+}
+
+.vendash-order-detail-row-alt {
+  background: #f8f9fa;
+}
+
+.vendash-order-detail-label {
+  color: #333;
+  font-weight: 700;
+  flex: 1;
+}
+
+.vendash-order-detail-value {
+  color: #666;
+  text-align: right;
+  flex: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 6px;
+}
+
+.vendash-order-actions {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vendash-order-action-btn {
+  padding: 5px;
+  border: none;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: opacity 0.2s;
+}
+
+.vendash-order-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vendash-accept-btn {
+  background: #10b981;
+  color: white;
+}
+
+.vendash-reject-btn {
+  background: #ef4444;
+  color: white;
+}
+
+.vendash-deliver-btn {
+  background: #3b82f6;
+  color: white;
+}
+
+.vendash-rejection-reason-input {
+  margin-top: 2px;
+}
+
+.vendash-reason-input {
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #e0d6cc;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.vendash-waiting-received {
+  padding: 5px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #0369a1;
+  text-align: center;
+}
+
+.vendash-order-cancelled-note {
+  padding: 5px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #dc2626;
+  text-align: center;
+}
+
+.vendash-spinning-icon {
+  animation: vendash-spin-loader 1s linear infinite;
+}
+
+/* Transactions Tab */
+.vendash-transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vendash-transaction-item {
+  background: #f9f1eb;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #e0d6cc;
+}
+
+.vendash-transaction-header {
+  padding: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.vendash-transaction-type-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.vendash-transaction-type-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 8px;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 2px;
+}
+
+.vendash-transaction-order {
+  font-size: 9px;
+  color: #666;
+  display: block;
+}
+
+.vendash-transaction-amount-section {
+  text-align: right;
+}
+
+.vendash-transaction-amount {
+  font-size: 12px;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 1px 0;
+}
+
+.vendash-transaction-date {
+  font-size: 9px;
+  color: #666;
+}
+
+.vendash-transaction-details {
+  padding: 6px;
+  border-top: 1px solid #e0d6cc;
+  background: white;
+}
+
+.vendash-transaction-detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 10px;
+  padding: 3px;
+  border-radius: 2px;
+}
+
+.vendash-transaction-detail-row-alt {
+  background: #f8f9fa;
+}
+
+.vendash-transaction-detail-label {
+  color: #333;
+  font-weight: 700;
+  flex: 1;
+}
+
+.vendash-transaction-detail-value {
+  color: #666;
+  text-align: right;
+  flex: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 6px;
+}
+
+/* Products Tab */
+.vendash-products-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 3px;
+}
+
+.vendash-view-toggle {
+  display: flex;
+  gap: 1px;
+  background: #f9f1eb;
+  border-radius: 3px;
+  padding: 1px;
+}
+
+.vendash-view-btn {
+  padding: 3px 5px;
+  background: none;
+  border: none;
+  border-radius: 2px;
+  font-size: 9px;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.vendash-view-btn-active {
+  background: white;
+  color: #9B4819;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.vendash-filter-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.vendash-filter-select,
+.vendash-sort-select {
+  padding: 3px;
+  border: 1px solid #e0d6cc;
+  border-radius: 2px;
+  font-size: 9px;
+  background: white;
+  color: #333;
+  min-width: 70px;
+}
+
+.vendash-products-count {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 9px;
+  color: #666;
+}
+
+.vendash-clear-filter-btn {
+  background: none;
+  border: none;
+  color: #9B4819;
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vendash-products-display {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vendash-product-item-rectangular {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: white;
+  border: 1px solid #e0d6cc;
+  border-radius: 3px;
+}
+
+.vendash-product-image-container {
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.vendash-product-main-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 2px;
+}
+
+.vendash-product-image-placeholder {
+  width: 100%;
+  height: 100%;
+  background: #f9f1eb;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9B4819;
+}
+
+.vendash-product-status-badge {
+  position: absolute;
+  bottom: 1px;
+  left: 1px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  font-size: 7px;
+  font-weight: 600;
+  color: white;
+}
+
+.vendash-product-active {
+  background: #10b981;
+}
+
+.vendash-product-inactive {
+  background: #6b7280;
+}
+
+.vendash-product-promoted-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  padding: 1px 2px;
+  background: #f59e0b;
+  color: white;
+  border-radius: 6px;
+  font-size: 7px;
+  font-weight: 600;
+}
+
+.vendash-product-info-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.vendash-product-header {
+  margin-bottom: 2px;
+}
+
+.vendash-product-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vendash-product-price {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9B4819;
+  margin: 0;
+}
+
+.vendash-product-stats-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.vendash-product-stat {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 8px;
+  color: #666;
+}
+
+.vendash-product-inventory-info,
+.vendash-product-revenue-info {
+  font-size: 8px;
+  color: #666;
+  margin-bottom: 1px;
+}
+
+.vendash-inventory-label,
+.vendash-revenue-label {
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.vendash-product-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.vendash-product-action-btn {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 2px;
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.vendash-edit-btn {
+  background: #3b82f6;
+  color: white;
+}
+
+.vendash-delete-btn {
+  background: #ef4444;
+  color: white;
+}
+
+/* Overview Tab */
 .vendash-stats-grid-overview {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 3px;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .vendash-stat-card-item {
-  padding: 6px;
+  padding: 4px;
   background: #f9f1eb;
-  border-radius: 4px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
 }
 
 .vendash-stat-icon-wrapper {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: #9B4819;
 }
 
 .vendash-stat-details-content h3 {
-  font-size: 9px;
+  font-size: 8px;
   color: #666;
   margin: 0 0 1px 0;
   font-weight: 600;
 }
 
 .vendash-stat-number-value {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   color: #333;
   margin: 0;
 }
 
-/* Quick Actions */
 .vendash-quick-actions-section {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .vendash-actions-grid-buttons {
@@ -494,10 +1065,10 @@
 }
 
 .vendash-action-button-item {
-  padding: 8px;
+  padding: 5px;
   background: #f9f1eb;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 3px;
+  font-size: 9px;
   color: #9B4819;
   cursor: pointer;
   display: flex;
@@ -511,30 +1082,6 @@
   background: #f0e6dc;
 }
 
-/* Products Section */
-.vendash-products-display-section {
-  margin-top: 12px;
-}
-
-.vendash-section-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.vendash-view-all-button {
-  background: none;
-  border: none;
-  color: #9B4819;
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
 .vendash-products-grid-container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -543,21 +1090,16 @@
 
 .vendash-product-card-item {
   background: white;
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
-  transition: all 0.2s ease;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-.vendash-product-card-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border: 1px solid #e0d6cc;
 }
 
 .vendash-product-image-wrapper {
   position: relative;
   width: 100%;
-  height: 80px;
+  height: 60px;
 }
 
 .vendash-product-image-display {
@@ -568,149 +1110,66 @@
 
 .vendash-product-badge-status {
   position: absolute;
-  top: 4px;
-  left: 4px;
-  padding: 2px 4px;
-  background: #9B4819;
-  color: white;
-  border-radius: 10px;
-  font-size: 8px;
+  top: 2px;
+  left: 2px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  font-size: 7px;
   font-weight: 600;
   text-transform: uppercase;
+  color: white;
 }
 
 .vendash-product-badge-active {
   background: #28a745;
 }
 
-.vendash-product-badge-draft {
+.vendash-product-badge-inactive {
   background: #6c757d;
 }
 
-.vendash-product-badge-sold_out {
-  background: #dc3545;
-}
-
 .vendash-product-info-content {
-  padding: 6px;
+  padding: 4px;
 }
 
 .vendash-product-title-text {
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 600;
   color: #333;
-  margin: 0 0 2px 0;
+  margin: 0 0 1px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .vendash-product-price-amount {
-  font-size: 12px;
-  font-weight: 700;
-  color: #9B4819;
-  margin: 0 0 4px 0;
-}
-
-.vendash-product-stats-row {
-  display: flex;
-  gap: 6px;
-  font-size: 9px;
-  color: #666;
-  margin-bottom: 4px;
-}
-
-.vendash-product-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.vendash-product-revenue-text {
-  font-size: 9px;
-  color: #666;
-  padding-top: 4px;
-}
-
-/* Empty States */
-.vendash-empty-state-container {
-  text-align: center;
-  padding: 40px 20px;
-  color: #666;
-}
-
-.vendash-empty-icon-container {
-  margin-bottom: 8px;
-  color: #e0d6cc;
-}
-
-.vendash-empty-state-container h4 {
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
-  margin: 0 0 4px 0;
-}
-
-.vendash-empty-state-container p {
-  font-size: 11px;
-  color: #999;
-  margin: 0 0 12px 0;
-  line-height: 1.4;
-}
-
-.vendash-cta-primary-button {
-  background: #9B4819;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-/* Products Tab Header */
-.vendash-tab-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  gap: 8px;
-}
-
-.vendash-tab-header-row h3 {
-  font-size: 14px;
+  font-size: 10px;
   font-weight: 700;
   color: #9B4819;
   margin: 0 0 2px 0;
 }
 
-.vendash-tab-header-row p {
-  font-size: 11px;
+.vendash-product-stats-row {
+  display: flex;
+  gap: 4px;
+  font-size: 8px;
   color: #666;
-  margin: 0;
+  margin-bottom: 2px;
 }
 
-.vendash-add-product-button {
-  background: #9B4819;
-  color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
+.vendash-product-stat-item {
   display: flex;
   align-items: center;
-  gap: 3px;
-  white-space: nowrap;
-  flex-shrink: 0;
+  gap: 1px;
 }
 
-/* Analytics Grid */
+.vendash-product-revenue-text {
+  font-size: 8px;
+  color: #666;
+  padding-top: 2px;
+}
+
+/* Analytics Tab */
 .vendash-analytics-grid-container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -718,40 +1177,127 @@
 }
 
 .vendash-analytics-card-item {
-  padding: 12px;
+  padding: 6px;
   background: #f9f1eb;
-  border-radius: 4px;
+  border-radius: 3px;
   text-align: center;
 }
 
 .vendash-analytics-icon-container {
-  margin-bottom: 6px;
+  margin-bottom: 3px;
   color: #9B4819;
 }
 
 .vendash-analytics-card-item h4 {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: #333;
-  margin: 0 0 4px 0;
+  margin: 0 0 2px 0;
 }
 
 .vendash-analytics-card-item p {
-  font-size: 10px;
+  font-size: 8px;
   color: #666;
-  margin: 0 0 6px 0;
-  line-height: 1.3;
+  margin: 0 0 3px 0;
+  line-height: 1.2;
 }
 
 .vendash-coming-soon-badge {
-  font-size: 10px;
+  font-size: 8px;
   color: #9B4819;
   font-weight: 600;
-  padding: 2px 6px;
+  padding: 1px 4px;
   background: white;
   border: 1px solid #9B4819;
-  border-radius: 10px;
+  border-radius: 6px;
   display: inline-block;
+}
+
+/* Empty States */
+.vendash-empty-state-container {
+  text-align: center;
+  padding: 20px 6px;
+  color: #666;
+}
+
+.vendash-empty-icon-container {
+  margin-bottom: 4px;
+  color: #e0d6cc;
+}
+
+.vendash-empty-state-container h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 2px 0;
+}
+
+.vendash-empty-state-container p {
+  font-size: 9px;
+  color: #999;
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+}
+
+.vendash-cta-primary-button {
+  background: #9B4819;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Section Headers */
+.vendash-section-title-heading {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 4px;
+  padding-left: 2px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.vendash-section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.vendash-view-all-button {
+  background: none;
+  border: none;
+  color: #9B4819;
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.vendash-add-product-button {
+  background: #9B4819;
+  color: white;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* Shop Popup */
@@ -766,22 +1312,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 6px;
 }
 
 .vendash-shop-popup-modal {
   background: white;
-  border-radius: 8px;
+  border-radius: 5px;
   width: 100%;
-  max-width: 400px;
-  max-height: 80vh;
+  max-width: 280px;
+  max-height: 60vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .vendash-popup-header-section {
-  padding: 12px 16px;
+  padding: 6px 10px;
   background: #9B4819;
   color: white;
   display: flex;
@@ -790,7 +1336,7 @@
 }
 
 .vendash-popup-header-section h3 {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   margin: 0;
 }
@@ -799,11 +1345,11 @@
   background: none;
   border: none;
   color: white;
-  font-size: 18px;
+  font-size: 14px;
   cursor: pointer;
   padding: 0;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -812,17 +1358,17 @@
 .vendash-shops-list-container {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px;
 }
 
 .vendash-shop-list-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 4px;
+  padding: 4px;
   background: #f9f1eb;
-  border-radius: 4px;
-  margin-bottom: 3px;
+  border-radius: 2px;
+  margin-bottom: 1px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -833,28 +1379,28 @@
 
 .vendash-shop-list-item-active {
   background: #e7f1ff;
-  border-left: 3px solid #9B4819;
+  border-left: 2px solid #9B4819;
 }
 
 .vendash-shop-logo-small-image {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
   object-fit: cover;
   flex-shrink: 0;
 }
 
 .vendash-shop-logo-small-fallback {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
   background: #9B4819;
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 12px;
+  font-size: 9px;
 }
 
 .vendash-shop-details-content {
@@ -863,17 +1409,17 @@
 }
 
 .vendash-shop-details-content h4 {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   color: #333;
-  margin: 0 0 2px 0;
+  margin: 0 0 1px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .vendash-shop-status-text {
-  font-size: 10px;
+  font-size: 8px;
   color: #666;
 }
 
@@ -883,7 +1429,7 @@
 }
 
 .vendash-popup-footer-section {
-  padding: 12px;
+  padding: 6px;
 }
 
 .vendash-create-shop-action-button {
@@ -891,79 +1437,85 @@
   background: #9B4819;
   color: white;
   border: none;
-  padding: 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 6px;
+  border-radius: 3px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 
-.vendash-create-shop-action-button:hover {
-  background: #7a3914;
-}
-
-/* Bottom Navigation - Fixed max height 35px, icons only */
-.vendash-bottom-navigation-bar {
+/* Bottom Navigation - EXACTLY as specified */
+.bottom-navigation {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: white;
+  background: rgba(255, 255, 255, 0.384);
+  border-top: 1px solid rgba(155, 73, 25, 0);
   display: flex;
-  padding: 3px;
-  z-index: 1000;
-  max-height: 35px;
+  justify-content: space-around;
+  align-items: center;
+  padding: 1px 1px;
   height: 35px;
-  box-sizing: border-box;
-  width: 100%;
-  box-shadow: 0 -1px 3px rgba(0,0,0,0.1);
+  z-index: 5000;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -1px 4px rgba(155, 73, 25, 0);
 }
 
-.vendash-nav-item-button {
-  flex: 1;
-  background: none;
+.nav-button {
+  background: transparent;
   border: none;
+  padding: 1px;
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  height: 29px;
-  box-sizing: border-box;
-  padding: 0;
-}
-
-.vendash-nav-item-button:hover {
-  background: #f9f1eb;
+  gap: 0;
+  flex: 1;
+  height: 30px;
   border-radius: 4px;
+  transition: background 0.15s ease;
 }
 
-.vendash-nav-item-button svg {
-  color: #666;
-  height: 18px;
-  width: 18px;
+.nav-button:hover {
+  background: rgba(155, 73, 25, 0.185);
 }
 
-/* Buttons */
-.vendash-primary-action-button {
-  background: #9B4819;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
+.nav-icon {
+  font-size: 16px;
+  line-height: 1;
+  height: 14px;
+  display: flex;
   align-items: center;
-  gap: 3px;
+  color: #9B4819;
 }
 
-/* Desktop Responsive - Full width */
+.nav-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9B4819;
+  line-height: 1;
+  white-space: nowrap;
+  margin-top: -1px;
+}
+
+.nav-button.active {
+  background: rgba(155, 72, 25, 0.1);
+}
+
+.nav-button.active .nav-label {
+  color: #9B4819;
+}
+
+.nav-button.active .nav-icon {
+  color: #9B4819;
+}
+
+/* Desktop Responsive - NO side padding */
 @media (min-width: 768px) {
   .vendash-container {
     width: 100%;
@@ -973,60 +1525,47 @@
   .vendash-header-main {
     width: 100%;
     max-width: 100%;
-    padding: 0 12px;
   }
   
   .vendash-main-content {
     width: 100%;
     max-width: 100%;
-    padding: 0 12px;
   }
   
-  .vendash-balance-cards-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-  }
-  
-  .vendash-products-grid-container {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
+  .vendash-order-stats-grid {
+    grid-template-columns: repeat(6, 1fr);
   }
   
   .vendash-stats-grid-overview {
     grid-template-columns: repeat(6, 1fr);
-    gap: 6px;
   }
   
-  .vendash-bottom-navigation-bar {
-    padding: 3px 12px;
+  .vendash-products-grid-container {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .vendash-shop-identity-card {
+    max-width: 400px;
+    margin-right: 8px;
+  }
+  
+  .vendash-balance-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
   }
 }
 
 @media (min-width: 1024px) {
-  .vendash-container {
-    width: 100%;
-    max-width: 100%;
-  }
-  
-  .vendash-header-main {
-    width: 100%;
-    max-width: 100%;
-    padding: 0 16px;
-  }
-  
-  .vendash-main-content {
-    width: 100%;
-    max-width: 100%;
-    padding: 0 16px;
-  }
-  
   .vendash-products-grid-container {
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
   }
   
-  .vendash-bottom-navigation-bar {
-    padding: 3px 16px;
+  .vendash-analytics-grid-container {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .vendash-shop-identity-card {
+    margin-right: 12px;
   }
 }
 
@@ -1038,46 +1577,4 @@
 
 *::-webkit-scrollbar {
   display: none;
-}
-
-/* Temporary inline-style fallback for product display */
-.vendash-product-item-rectangular {
-  display: flex !important;
-  gap: 12px !important;
-  padding: 12px !important;
-  background: white !important;
-  border: 1px solid #e0d6cc !important;
-  border-radius: 8px !important;
-  margin-bottom: 8px !important;
-}
-
-.vendash-product-image-container {
-  width: 100px !important;
-  height: 100px !important;
-  flex-shrink: 0 !important;
-}
-
-.vendash-product-main-image {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-  border-radius: 6px !important;
-}
-
-.vendash-product-info-section {
-  flex: 1 !important;
-  min-width: 0 !important;
-}
-
-.vendash-product-name {
-  font-size: 14px !important;
-  font-weight: 600 !important;
-  margin: 0 0 4px 0 !important;
-  color: #333 !important;
-}
-
-.vendash-product-price {
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  color: #9B4819 !important;
 }

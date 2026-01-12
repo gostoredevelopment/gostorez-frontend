@@ -4,6 +4,7 @@ import { auth, db } from '../../lib/firebase';
 import { supabase } from '../../lib/supabaseClient';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import OrderComponent from './OrderComponent';
 import { 
   ArrowLeft, 
   MapPin, 
@@ -216,6 +217,8 @@ const CartPage: React.FC = () => {
       setUserProfile(profile);
     }
   };
+
+  const [showOrderComponent, setShowOrderComponent] = useState(false);
 
   // Fetch cart items with vendor profiles
   const fetchCartItems = async (userId: string) => {
@@ -1362,12 +1365,29 @@ const CartPage: React.FC = () => {
               Total: {formatPrice(summary.amount)}
             </div>
             
-            <button className="cartpage-placeorderbtn">
+            <button className="cartpage-placeorderbtn"
+              onClick={() => setShowOrderComponent(true)}
+  disabled={!locationStep.state_id || !locationStep.precise_location}
+  >
               Place Order
             </button>
           </div>
         </div>
       )}
+
+      {showOrderComponent && (
+  <OrderComponent
+    cartItems={cartItems}
+    locationStep={locationStep}
+    userProfile={userProfile}
+    totalAmount={summary.amount}
+    onOrderSuccess={(orderId: string) => {
+      setShowOrderComponent(false);
+      navigate(`/orders/${orderId}`);
+    }}
+    onClose={() => setShowOrderComponent(false)}
+  />
+)}
     </div>
   );
 };

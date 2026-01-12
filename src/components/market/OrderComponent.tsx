@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { auth } from '../../lib/firebase';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from 'firebase/auth';
-import { Shield, AlertCircle, CheckCircle, CreditCard, X, Receipt, Store, User as UserIcon, Package } from 'lucide-react';
+import { Shield, AlertCircle, CheckCircle, CreditCard, X, Receipt, Package } from 'lucide-react';
 import './OrderComponent.css';
 
 // Types
@@ -37,18 +37,6 @@ interface UserProfile {
   profileImage?: string;
 }
 
-interface VendorProfile {
-  id: string;
-  vendor_id: string;
-  shop_name: string;
-  profile_image: string;
-  balance?: number;
-  total_earnings?: number;
-  total_sales?: number;
-  pending_balance?: number;
-  available_balance?: number;
-}
-
 interface LocationStep {
   state_id?: number;
   university_id?: number;
@@ -57,32 +45,6 @@ interface LocationStep {
   state_name?: string;
   university_name?: string;
   campus_name?: string;
-}
-
-interface OrderItem {
-  order_id: string;
-  product_id: string;
-  vendor_id: string;
-  product_title: string;
-  vendor_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  status: 'pending' | 'accepted' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'reversed';
-  location_details?: any;
-}
-
-interface Transaction {
-  id: string;
-  order_id: string;
-  user_id: string;
-  vendor_id?: string;
-  type: 'purchase' | 'vendor_credit' | 'refund' | 'reversal' | 'deposit';
-  amount: number;
-  old_balance: number;
-  new_balance: number;
-  description: string;
-  metadata?: any;
 }
 
 interface OrderComponentProps {
@@ -108,80 +70,69 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
   const [error, setError] = useState<string>('');
   const [userBalance, setUserBalance] = useState<number>(0);
   const [receiptData, setReceiptData] = useState<any>(null);
-  const [vendors, setVendors] = useState<VendorProfile[]>([]);
+  const [processingOrder, setProcessingOrder] = useState<string>('');
 
-  // Initialize component
-  useEffect(() => {
-    loadUserBalance();
-    loadVendorProfiles();
-  }, []);
-
-  const loadUserBalance = async () => {
+  // Fetch fresh user balance
+  const fetchFreshUserBalance = async (): Promise<number> => {
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
+      if (!user) return 0;
 
-      // Check if user exists in Supabase users table
       const { data: supabaseUser, error } = await supabase
         .from('users')
-        .select('balance, total_spent, total_orders')
+        .select('balance')
         .eq('firebase_uid', user.uid)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error;
-
-      if (supabaseUser) {
-        setUserBalance(supabaseUser.balance || 0);
-      } else {
-        // Create user in Supabase if doesn't exist
-        await createSupabaseUser(user);
-        setUserBalance(0);
-      }
+      if (error || !supabaseUser) return 0;
+      return supabaseUser.balance || 0;
     } catch (error) {
-      console.error('Error loading user balance:', error);
-      setUserBalance(0);
+      console.error('Error fetching user balance:', error);
+      return 0;
     }
   };
 
-  const createSupabaseUser = async (user: User) => {
+  // Check for duplicate orders
+  const checkForDuplicateOrder = async (orderNumber: string): Promise<boolean> => {
     try {
-      const userData = {
-        firebase_uid: user.uid,
-        name: user.displayName || user.email?.split('@')[0] || 'User',
-        email: user.email || '',
-        avatar_url: user.photoURL || '',
-        balance: 0,
-        total_spent: 0,
-        total_orders: 0,
-        user_type: 'customer',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await supabase
-        .from('users')
-        .insert([userData]);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error creating Supabase user:', error);
-    }
-  };
-
-  const loadVendorProfiles = async () => {
-    try {
-      const vendorIds = Array.from(new Set(cartItems.map(item => item.vendor_id)));
-      
       const { data, error } = await supabase
-        .from('vendor_profiles')
-        .select('*')
-        .in('vendor_id', vendorIds);
+        .from('orders')
+        .select('id')
+        .eq('order_number', orderNumber)
+        .limit(1);
 
-      if (error) throw error;
-
-      setVendors(data || []);
+      if (error) return false;
+      return !!(data && data.length > 0);
     } catch (error) {
-      console.error('Error loading vendor profiles:', error);
+      console.error('Error checking duplicate order:', error);
+      return false;
+    }
+  };
+
+  // Check product inventory
+  const checkProductInventory = async (): Promise<boolean> => {
+    try {
+      for (const item of cartItems) {
+        const { data: product, error } = await supabase
+          .from('products')
+          .select('inventory')
+          .eq('id', item.product_id)
+          .single();
+
+        if (error || !product) {
+          console.error(`Product ${item.product_id} not found:`, error);
+          return false;
+        }
+        
+        if (product.inventory < item.quantity) {
+          console.error(`Insufficient inventory for product ${item.product_id}: ${product.inventory} < ${item.quantity}`);
+          return false;
+        }
+      }
+      return true;
+    } catch (error) {
+      console.error('Error checking inventory:', error);
+      return false;
     }
   };
 
@@ -191,8 +142,10 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
     return `GOSTOREZ-${timestamp.slice(-8)}-${random}`;
   };
 
-  const updateUserBalance = async (userId: string, amount: number, type: 'deduct' | 'add') => {
+  // Safe user balance update with optimistic concurrency
+  const updateUserBalanceSafely = async (userId: string, amount: number): Promise<{success: boolean, oldBalance: number, newBalance: number}> => {
     try {
+      // Get current balance
       const { data: currentUser, error: fetchError } = await supabase
         .from('users')
         .select('balance, total_spent, total_orders')
@@ -202,18 +155,17 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
       if (fetchError) throw fetchError;
 
       const oldBalance = currentUser.balance || 0;
-      let newBalance = oldBalance;
-      let totalSpent = currentUser.total_spent || 0;
-      let totalOrders = currentUser.total_orders || 0;
-
-      if (type === 'deduct') {
-        newBalance = oldBalance - amount;
-        totalSpent += amount;
-        totalOrders += 1;
-      } else {
-        newBalance = oldBalance + amount;
+      
+      // Verify balance is sufficient
+      if (oldBalance < amount) {
+        return { success: false, oldBalance, newBalance: oldBalance };
       }
 
+      const newBalance = oldBalance - amount;
+      const totalSpent = (currentUser.total_spent || 0) + amount;
+      const totalOrders = (currentUser.total_orders || 0) + 1;
+
+      // Atomic update with optimistic concurrency control
       const { error: updateError } = await supabase
         .from('users')
         .update({
@@ -222,71 +174,64 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
           total_orders: totalOrders,
           updated_at: new Date().toISOString()
         })
-        .eq('firebase_uid', userId);
+        .eq('firebase_uid', userId)
+        .eq('balance', oldBalance); // Prevent race conditions
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        // Balance was changed by another transaction
+        throw new Error('CONCURRENT_UPDATE: Balance was updated by another transaction. Please try again.');
+      }
 
-      return { oldBalance, newBalance };
+      return { success: true, oldBalance, newBalance };
     } catch (error) {
       console.error('Error updating user balance:', error);
       throw error;
     }
   };
 
-  const updateVendorBalance = async (vendorId: string, amount: number, type: 'sale' | 'refund') => {
+  // Safe vendor balance update
+  const updateVendorBalanceSafely = async (vendorId: string, amount: number): Promise<boolean> => {
     try {
+      // Get current vendor data
       const { data: currentVendor, error: fetchError } = await supabase
         .from('vendor_profiles')
-        .select('balance, total_earnings, total_sales, pending_balance, available_balance')
+        .select('pending_balance, total_earnings, total_sales')
         .eq('vendor_id', vendorId)
         .single();
 
       if (fetchError) throw fetchError;
 
-      const oldBalance = currentVendor.balance || 0;
-      let newBalance = oldBalance;
-      let totalEarnings = currentVendor.total_earnings || 0;
-      let totalSales = currentVendor.total_sales || 0;
-      let pendingBalance = currentVendor.pending_balance || 0;
-      let availableBalance = currentVendor.available_balance || 0;
+      const oldPendingBalance = currentVendor.pending_balance || 0;
+      const pendingBalance = oldPendingBalance + amount;
+      const totalEarnings = (currentVendor.total_earnings || 0) + amount;
+      const totalSales = (currentVendor.total_sales || 0) + 1;
 
-      if (type === 'sale') {
-        // Add to pending balance first (will be moved to available after delivery)
-        pendingBalance += amount;
-        totalEarnings += amount;
-        totalSales += 1;
-      } else {
-        // For refunds
-        newBalance = Math.max(oldBalance - amount, 0);
-        availableBalance = Math.max(availableBalance - amount, 0);
-      }
-
+      // Atomic update
       const { error: updateError } = await supabase
         .from('vendor_profiles')
         .update({
-          balance: newBalance,
+          pending_balance: pendingBalance,
           total_earnings: totalEarnings,
           total_sales: totalSales,
-          pending_balance: pendingBalance,
-          available_balance: availableBalance,
           updated_at: new Date().toISOString()
         })
-        .eq('vendor_id', vendorId);
+        .eq('vendor_id', vendorId)
+        .eq('pending_balance', oldPendingBalance);
 
       if (updateError) throw updateError;
 
-      return { oldBalance, newBalance };
+      return true;
     } catch (error) {
       console.error('Error updating vendor balance:', error);
       throw error;
     }
   };
 
+  // Create order record
   const createOrderRecord = async (orderNumber: string, userId: string) => {
     try {
       const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      // Group items by vendor for the order record
       const vendorGroups = cartItems.reduce((acc, item) => {
         if (!acc[item.vendor_id]) {
           acc[item.vendor_id] = {
@@ -319,7 +264,7 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         total_amount: totalAmount,
         currency: 'NGN',
         status: 'pending',
-        payment_status: 'pending',
+        payment_status: 'completed',
         payment_method: 'wallet',
         delivery_location: {
           state_id: locationStep.state_id,
@@ -347,15 +292,19 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating order record:', error);
+        throw new Error(`Failed to create order: ${error.message}`);
+      }
 
       return order;
     } catch (error) {
-      console.error('Error creating order record:', error);
+      console.error('Error in createOrderRecord:', error);
       throw error;
     }
   };
 
+  // Create order items
   const createOrderItems = async (orderId: string) => {
     try {
       const orderItems = cartItems.map(item => ({
@@ -368,6 +317,8 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         unit_price: item.product.price,
         total_price: item.product.price * item.quantity,
         status: 'pending',
+        user_status: 'ordered',
+        vendor_status: 'pending',
         location_details: {
           state_id: locationStep.state_id,
           state_name: locationStep.state_name,
@@ -384,61 +335,48 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         .from('order_items')
         .insert(orderItems);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating order items:', error);
+        throw new Error(`Failed to create order items: ${error.message}`);
+      }
     } catch (error) {
-      console.error('Error creating order items:', error);
+      console.error('Error in createOrderItems:', error);
       throw error;
     }
   };
 
-  const createTransactionRecord = async (
-    orderId: string,
-    userId: string,
-    vendorId: string | null,
-    type: Transaction['type'],
-    amount: number,
-    oldBalance: number,
-    newBalance: number,
-    description: string,
-    metadata?: any
-  ) => {
-    try {
-      const transactionId = `trx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const transactionData = {
-        id: transactionId,
-        order_id: orderId,
-        user_id: userId,
-        vendor_id: vendorId,
-        type,
-        amount,
-        old_balance: oldBalance,
-        new_balance: newBalance,
-        description,
-        metadata: metadata || {},
-        created_at: new Date().toISOString()
-      };
-
-      const { error } = await supabase
-        .from('transactions')
-        .insert([transactionData]);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error creating transaction record:', error);
-      throw error;
-    }
-  };
-
+  // Update product inventory - FIXED VERSION without .sql
   const updateProductInventory = async () => {
     try {
       for (const item of cartItems) {
-        const { error } = await supabase.rpc('decrement_product_inventory', {
-          p_product_id: item.product_id,
-          p_quantity: item.quantity
-        });
+        // First, get current inventory
+        const { data: product, error: fetchError } = await supabase
+          .from('products')
+          .select('inventory')
+          .eq('id', item.product_id)
+          .single();
 
-        if (error) throw error;
+        if (fetchError) {
+          throw new Error(`Product ${item.product_id} not found: ${fetchError.message}`);
+        }
+
+        const currentInventory = product.inventory || 0;
+        if (currentInventory < item.quantity) {
+          throw new Error(`Insufficient inventory for ${item.product.title}. Available: ${currentInventory}, Requested: ${item.quantity}`);
+        }
+
+        // Update inventory directly
+        const { error: updateError } = await supabase
+          .from('products')
+          .update({ 
+            inventory: currentInventory - item.quantity,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', item.product_id);
+
+        if (updateError) {
+          throw new Error(`Failed to update inventory for ${item.product.title}: ${updateError.message}`);
+        }
       }
     } catch (error) {
       console.error('Error updating inventory:', error);
@@ -446,6 +384,7 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
     }
   };
 
+  // Clear cart
   const clearCart = async (userId: string) => {
     try {
       const { error } = await supabase
@@ -453,106 +392,138 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         .delete()
         .eq('user_id', userId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error clearing cart:', error);
+        throw new Error(`Failed to clear cart: ${error.message}`);
+      }
     } catch (error) {
-      console.error('Error clearing cart:', error);
+      console.error('Error in clearCart:', error);
       throw error;
     }
   };
 
+  // Main order processing function
   const processOrder = async () => {
+    // Prevent duplicate clicks
+    if (processingOrder) {
+      console.log('Order already processing, ignoring duplicate click');
+      return;
+    }
+
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('User not authenticated. Please login again.');
+      }
+
+      // Generate unique processing ID
+      const processingId = `proc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      setProcessingOrder(processingId);
+
       setLoading(true);
-      setStep('processing');
       setError('');
 
-      const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
+      // Step 1: Generate order number and check for duplicates
+      const orderNumber = generateOrderNumber();
+      setProcessingOrder(`Checking duplicate order: ${orderNumber}`);
+      
+      const isDuplicate = await checkForDuplicateOrder(orderNumber);
+      if (isDuplicate) {
+        throw new Error('Order number conflict detected. Please try again with a new order.');
+      }
 
-      // Check if user has sufficient balance
-      if (userBalance < totalAmount) {
+      // Step 2: Check product inventory
+      setProcessingOrder('Checking product inventory...');
+      const inventoryOk = await checkProductInventory();
+      if (!inventoryOk) {
+        throw new Error('Some products are out of stock or unavailable. Please update your cart and try again.');
+      }
+
+      // Step 3: Fetch fresh user balance
+      setProcessingOrder('Checking account balance...');
+      const freshBalance = await fetchFreshUserBalance();
+      if (freshBalance < totalAmount) {
         setStep('insufficient');
-        setError(`Insufficient balance. Current balance: ₦${userBalance.toLocaleString()}. Please deposit.`);
+        setError(`Insufficient balance. Current balance: ₦${freshBalance.toLocaleString()}. Required: ₦${totalAmount.toLocaleString()}. Please deposit funds.`);
+        setProcessingOrder('');
+        setLoading(false);
         return;
       }
 
-      // Generate order number
-      const orderNumber = generateOrderNumber();
+      setStep('processing');
+      setProcessingOrder('Creating order record...');
 
-      // 1. Create order record
+      // Step 4: Create order record
       const order = await createOrderRecord(orderNumber, user.uid);
       setOrderId(order.id);
 
-      // 2. Create order items
-      await createOrderItems(order.id);
+      // Step 5: Update user balance with locking
+      setProcessingOrder('Processing payment...');
+      const balanceResult = await updateUserBalanceSafely(user.uid, totalAmount);
+      if (!balanceResult.success) {
+        // Rollback order creation if balance insufficient
+        await supabase.from('orders').delete().eq('id', order.id);
+        setStep('insufficient');
+        setError('Insufficient balance detected during final verification. Order cancelled.');
+        setProcessingOrder('');
+        setLoading(false);
+        return;
+      }
 
-      // 3. Deduct from user balance and create transaction
-      const userBalanceUpdate = await updateUserBalance(user.uid, totalAmount, 'deduct');
-      
-      await createTransactionRecord(
-        order.id,
-        user.uid,
-        null,
-        'purchase',
-        totalAmount,
-        userBalanceUpdate.oldBalance,
-        userBalanceUpdate.newBalance,
-        `Purchase order ${orderNumber}`,
-        { order_number: orderNumber, items_count: cartItems.length }
-      );
-
-      // 4. Process each vendor's portion
+      // Step 6: Update vendor balances
+      setProcessingOrder('Updating vendor accounts...');
       const vendorGroups = cartItems.reduce((acc, item) => {
         const vendorAmount = item.product.price * item.quantity;
         if (!acc[item.vendor_id]) {
           acc[item.vendor_id] = {
             vendor_id: item.vendor_id,
             vendor_name: item.product.vendor_name,
-            total_amount: 0,
-            items: []
+            total_amount: 0
           };
         }
         acc[item.vendor_id].total_amount += vendorAmount;
-        acc[item.vendor_id].items.push({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          amount: vendorAmount
-        });
         return acc;
       }, {} as Record<string, any>);
 
-      // Process each vendor
+      let vendorUpdateFailed = false;
       for (const vendorId in vendorGroups) {
-        const vendorData = vendorGroups[vendorId];
-        
-        // Update vendor balance (add to pending balance)
-        const vendorBalanceUpdate = await updateVendorBalance(vendorId, vendorData.total_amount, 'sale');
-        
-        // Create transaction for vendor
-        await createTransactionRecord(
-          order.id,
-          user.uid,
-          vendorId,
-          'vendor_credit',
-          vendorData.total_amount,
-          vendorBalanceUpdate.oldBalance,
-          vendorBalanceUpdate.newBalance,
-          `Sale from order ${orderNumber}`,
-          { 
-            order_number: orderNumber, 
-            items: vendorData.items,
-            pending: true // Funds are in pending balance until delivery
-          }
-        );
+        try {
+          const success = await updateVendorBalanceSafely(vendorId, vendorGroups[vendorId].total_amount);
+          if (!success) vendorUpdateFailed = true;
+        } catch (error) {
+          vendorUpdateFailed = true;
+          console.error(`Failed to update vendor ${vendorId}:`, error);
+        }
       }
 
-      // 5. Update product inventory
+      if (vendorUpdateFailed) {
+        // Rollback: refund user and delete order
+        await supabase.from('orders').delete().eq('id', order.id);
+        // Restore user balance
+        await supabase
+          .from('users')
+          .update({ 
+            balance: freshBalance,
+            updated_at: new Date().toISOString()
+          })
+          .eq('firebase_uid', user.uid);
+        throw new Error('Failed to process vendor payments. Order has been cancelled and your balance has been restored.');
+      }
+
+      // Step 7: Create order items
+      setProcessingOrder('Creating order items...');
+      await createOrderItems(order.id);
+
+      // Step 8: Update product inventory
+      setProcessingOrder('Updating inventory...');
       await updateProductInventory();
 
-      // 6. Clear cart
+      // Step 9: Clear cart
+      setProcessingOrder('Clearing cart...');
       await clearCart(user.uid);
 
-      // 7. Prepare receipt data
+      // Step 10: Prepare receipt
+      setProcessingOrder('Generating receipt...');
       const receipt = {
         order_id: order.id,
         order_number: orderNumber,
@@ -573,25 +544,51 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
           locationStep.campus_name,
           locationStep.precise_location
         ].filter(Boolean).join(' - '),
-        transaction_id: `trx_${Date.now().toString().slice(-12)}`,
         balance_deducted: totalAmount,
-        new_balance: userBalance - totalAmount
+        new_balance: balanceResult.newBalance
       };
 
       setReceiptData(receipt);
+      setUserBalance(balanceResult.newBalance);
       setStep('success');
-      
-      // Update local balance
-      setUserBalance(prev => prev - totalAmount);
+      setProcessingOrder('');
 
     } catch (error: any) {
       console.error('Error processing order:', error);
-      setError(error.message || 'Failed to process order. Please try again.');
+      
+      // User-friendly error messages
+      if (error.message?.includes('CONCURRENT_UPDATE')) {
+        setError('Your account was updated by another transaction. Please check your balance and try again.');
+      } else if (error.message?.includes('Insufficient')) {
+        setStep('insufficient');
+        setError(error.message);
+      } else if (error.code === 'PGRST204') {
+        setError('Database configuration error. Please contact support.');
+      } else if (error.code === '23502') {
+        setError('Missing required order information. Please refresh and try again.');
+      } else if (error.code === '42501') {
+        setError('Permission denied. Please check your account permissions.');
+      } else if (error.code === '42P01') {
+        setError('Database table not found. Please contact support.');
+      } else {
+        setError(error.message || 'An unexpected error occurred. Please try again.');
+      }
+      
       setStep('confirm');
     } finally {
       setLoading(false);
+      setProcessingOrder('');
     }
   };
+
+  // Initialize component
+  useEffect(() => {
+    const initBalance = async () => {
+      const balance = await fetchFreshUserBalance();
+      setUserBalance(balance);
+    };
+    initBalance();
+  }, []);
 
   const formatPrice = (price: number) => `₦${price.toLocaleString('en-NG')}`;
 
@@ -600,7 +597,7 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
       bank_name: "WEMA BANK",
       account_number: "7839273645",
       account_name: "GoStorez Enterprises",
-      reference: `DEP-${userProfile?.email?.split('@')[0]?.toUpperCase()}-${Date.now().toString().slice(-6)}`
+      reference: `DEP-${userProfile?.email?.split('@')[0]?.toUpperCase() || 'USER'}-${Date.now().toString().slice(-6)}`
     };
   };
 
@@ -695,16 +692,16 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         <button
           className="order-cancel-btn"
           onClick={onClose}
-          disabled={loading}
+          disabled={loading || !!processingOrder}
         >
           Cancel
         </button>
         <button
           className="order-confirm-btn"
           onClick={processOrder}
-          disabled={loading || userBalance < totalAmount}
+          disabled={loading || userBalance < totalAmount || !!processingOrder}
         >
-          {loading ? 'Processing...' : 'Complete Purchase'}
+          {processingOrder ? 'Processing...' : loading ? 'Processing...' : 'Complete Purchase'}
         </button>
       </div>
 
@@ -720,35 +717,20 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
       <div className="processing-content">
         <div className="processing-spinner"></div>
         <h3>Processing Your Order</h3>
-        <p>Please wait while we confirm your payment and create your order...</p>
+        <p>{processingOrder || 'Please wait while we process your order...'}</p>
         
         <div className="processing-steps">
           <div className="processing-step active">
             <div className="step-icon">1</div>
-            <span>Verifying payment</span>
+            <span>Verifying details</span>
           </div>
           <div className="processing-step">
             <div className="step-icon">2</div>
-            <span>Creating order</span>
+            <span>Processing payment</span>
           </div>
           <div className="processing-step">
             <div className="step-icon">3</div>
-            <span>Notifying vendors</span>
-          </div>
-        </div>
-
-        <div className="processing-details">
-          <div className="detail-item">
-            <span>Order Total:</span>
-            <span>{formatPrice(totalAmount)}</span>
-          </div>
-          <div className="detail-item">
-            <span>Balance Deducted:</span>
-            <span>{formatPrice(totalAmount)}</span>
-          </div>
-          <div className="detail-item">
-            <span>New Balance:</span>
-            <span>{formatPrice(userBalance - totalAmount)}</span>
+            <span>Creating order</span>
           </div>
         </div>
       </div>
@@ -855,15 +837,6 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
           >
             Continue Shopping
           </button>
-          <button
-            className="success-btn outline"
-            onClick={() => {
-              // Print receipt
-              window.print();
-            }}
-          >
-            Print Receipt
-          </button>
         </div>
 
         <div className="success-note">
@@ -963,7 +936,6 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
             <button
               className="card-deposit-btn"
               onClick={() => {
-                // Redirect to card deposit page
                 window.open(`/deposit?amount=${totalAmount - userBalance}`, '_blank');
               }}
             >
@@ -988,7 +960,7 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
         </div>
 
         <div className="support-note">
-          <p>Need help with deposit? Contact support@gostorez.com or call +234-XXX-XXX-XXXX</p>
+          <p>Need help with deposit? Contact support@gostorez.com</p>
         </div>
       </div>
     </div>
@@ -997,7 +969,7 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
   return (
     <div className="order-component-overlay">
       <div className="order-component">
-        <button className="order-close-btn" onClick={onClose} disabled={loading}>
+        <button className="order-close-btn" onClick={onClose} disabled={loading || !!processingOrder}>
           <X size={24} />
         </button>
 
