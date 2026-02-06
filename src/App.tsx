@@ -20,6 +20,8 @@ import CartPage from './components/market/CartPage';
 import ChatList from "./components/ChatList";
 import ChatRoom from "./components/ChatRoom";
 import FavoritesPage from './components/market/FavoritesPage';
+import NotificationSystem from './components/NotificationSystem';
+import OneSignal from 'react-onesignal'; 
 
 
 // Welcome Page Component
@@ -182,8 +184,16 @@ const WelcomePage: React.FC = () => {
 
 // Main App Component
 function App() {
+
   return (
     <Router>
+      {/* Global Notification System - always present */}
+      <NotificationSystem 
+        autoInitialize={true}
+        showBell={false} // Hide bell since it will be in page headers
+        maxNotifications={100}
+      />
+
       <Routes>
         <Route path="/signin" element={<SignIn />} />
         <Route path="/signup" element={<SignUp />} />
@@ -215,6 +225,7 @@ function App() {
         
       </Routes>
     </Router>
+    
   );
 }
 

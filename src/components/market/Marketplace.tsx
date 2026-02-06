@@ -166,6 +166,27 @@ interface UserProfile {
   twitterHandle?: string;
 }
 
+// === ADDED FROM CHATLIST: Firebase User Profile Type ===
+type FirebaseUserProfile = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  profileImage?: string;
+  role?: string;
+  isVerified?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+// === END ADDED ===
+
+// === ADDED: User Filter Preferences Interface ===
+interface UserFilterPreferences {
+  lastActiveFilter: FilterState;
+  locationPath: string[];
+  updatedAt?: string;
+}
+// === END ADDED ===
+
 // Stack for tracking navigation history
 interface NavigationStackItem {
   type: 'product' | 'vendor';
@@ -188,6 +209,10 @@ const Marketplace: React.FC = () => {
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  
+  // === ADDED: User filter preferences state ===
+  const [userFilterPreferences, setUserFilterPreferences] = useState<UserFilterPreferences | null>(null);
+  // === END ADDED ===
   
   // Navigation stack for back/forward functionality
   const [navStack, setNavStack] = useState<NavigationStackItem[]>([]);
@@ -223,6 +248,285 @@ const Marketplace: React.FC = () => {
   const marketplaceRef = useRef<HTMLDivElement>(null);
   const vendorShopRef = useRef<HTMLDivElement>(null);
   const productDisplayRef = useRef<HTMLDivElement>(null);
+  
+  // === ADDED: Filter save timeout ref ===
+  const filterSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // === END ADDED ===
+
+  // === ADDED FROM CHATLIST: User Sync Functions ===
+  console.log("🔵 Marketplace Component Mounted");
+
+  // Fetch user profile from Firebase Firestore - EXACT COPY FROM CHATLIST
+  const fetchFirebaseUserProfile = async (firebaseUid: string): Promise<FirebaseUserProfile> => {
+    try {
+      console.log("🟡 [Marketplace] Fetching Firebase profile for:", firebaseUid);
+      const userDoc = await getDoc(doc(db, 'users', firebaseUid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        console.log("🟡 [Marketplace] Firebase user data found:", userData);
+        
+        const profile: FirebaseUserProfile = {
+          name: userData.name || '',
+          email: userData.email || '',
+          phone: userData.phone || '',
+          profileImage: userData.profileImage || '',
+          role: userData.role || 'user',
+          isVerified: userData.isVerified || false,
+          createdAt: userData.createdAt?.toDate().toISOString() || '',
+          updatedAt: userData.updatedAt?.toDate().toISOString() || ''
+        };
+        
+        return profile;
+      } else {
+        console.log("🟡 [Marketplace] No Firebase user document found");
+        // Create basic profile from auth data
+        const firebaseUser = auth.currentUser;
+        const profile: FirebaseUserProfile = {
+          name: firebaseUser?.displayName || '',
+          email: firebaseUser?.email || '',
+          phone: firebaseUser?.phoneNumber || '',
+          profileImage: firebaseUser?.photoURL || '',
+          role: 'user',
+          isVerified: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        return profile;
+      }
+    } catch (error) {
+      console.error('❌ [Marketplace] Error fetching Firebase user profile:', error);
+      const firebaseUser = auth.currentUser;
+      const profile: FirebaseUserProfile = {
+        name: firebaseUser?.displayName || '',
+        email: firebaseUser?.email || '',
+        phone: firebaseUser?.phoneNumber || '',
+        profileImage: firebaseUser?.photoURL || '',
+        role: 'user',
+        isVerified: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      return profile;
+    }
+  };
+
+  // Sync user data from Firebase to Supabase - EXACT COPY FROM CHATLIST
+  const syncUserToSupabase = async (firebaseUid: string, firebaseProfile: FirebaseUserProfile) => {
+    try {
+      console.log("🟡 [Marketplace] Syncing user to Supabase:", firebaseUid);
+      
+      // Check if user already exists in Supabase
+      const { data: existingUser, error: checkError } = await supabase
+        .from('users')
+        .select('id, firebase_uid, rooms, room_count')
+        .eq('firebase_uid', firebaseUid)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('[Marketplace] Error checking user in Supabase:', checkError);
+      }
+
+      const userData = {
+        firebase_uid: firebaseUid,
+        name: firebaseProfile.name || '',
+        email: firebaseProfile.email || '',
+        phone: firebaseProfile.phone || '',
+        avatar_url: firebaseProfile.profileImage || '',
+        user_type: 'user',
+        rooms: existingUser?.rooms || [],
+        room_count: existingUser?.room_count || 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_seen: new Date().toISOString(),
+        is_active: true
+      };
+
+      if (!existingUser) {
+        console.log("🟡 [Marketplace] Inserting new user to Supabase");
+        const { data: newUser, error: insertError } = await supabase
+          .from('users')
+          .insert([userData])
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('❌ [Marketplace] Error inserting user to Supabase:', insertError);
+        } else {
+          console.log('✅ [Marketplace] User synced to Supabase:', newUser.id);
+        }
+      } else {
+        console.log("🟡 [Marketplace] Updating existing user in Supabase");
+        // Update user, including avatar_url
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ 
+            name: userData.name,
+            email: userData.email,
+            phone: userData.phone,
+            avatar_url: userData.avatar_url,
+            rooms: userData.rooms,
+            room_count: userData.room_count,
+            last_seen: userData.last_seen,
+            updated_at: userData.updated_at
+          })
+          .eq('id', existingUser.id);
+
+        if (updateError) {
+          console.error('❌ [Marketplace] Error updating user in Supabase:', updateError);
+        } else {
+          console.log('✅ [Marketplace] User updated in Supabase');
+        }
+      }
+    } catch (error) {
+      console.error('❌ [Marketplace] Error in syncUserToSupabase:', error);
+    }
+  };
+
+  // Function to perform user sync - EXACT LOGIC FROM CHATLIST
+  const performUserSync = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      console.log("🟡 [Marketplace] No user logged in, skipping sync");
+      return;
+    }
+
+    console.log("🟡 [Marketplace] Performing user sync for:", user.uid);
+    
+    try {
+      // 1. Fetch profile from Firebase Firestore
+      const firebaseProfile = await fetchFirebaseUserProfile(user.uid);
+      
+      // 2. Sync to Supabase (with avatar)
+      await syncUserToSupabase(user.uid, firebaseProfile);
+      
+      console.log("✅ [Marketplace] User sync completed successfully");
+    } catch (error) {
+      console.error('❌ [Marketplace] Error in performUserSync:', error);
+    }
+  };
+  // === END ADDED FROM CHATLIST ===
+
+  // === ADDED: User Filter Preferences Functions ===
+  // Save filter preferences to database
+  const saveFilterPreferences = async (currentFilters: FilterState) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    try {
+      // Create location path array
+      const locationPath: string[] = [];
+      if (currentFilters.selectedState && currentFilters.selectedState !== 'show_all') {
+        locationPath.push(`state:${currentFilters.selectedState}`);
+      }
+      if (currentFilters.selectedUniversity) {
+        locationPath.push(`university:${currentFilters.selectedUniversity}`);
+      }
+      if (currentFilters.selectedCampus) {
+        locationPath.push(`campus:${currentFilters.selectedCampus}`);
+      }
+      if (currentFilters.selectedCategory !== 'all') {
+        locationPath.push(`category:${currentFilters.selectedCategory}`);
+      }
+      if (currentFilters.selectedVendor) {
+        locationPath.push(`vendor:${currentFilters.selectedVendor}`);
+      }
+      
+      const preferences: UserFilterPreferences = {
+        lastActiveFilter: currentFilters,
+        locationPath,
+        updatedAt: new Date().toISOString()
+      };
+      
+      // Save to database
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          user_filter_preferences: preferences,
+          updated_at: new Date().toISOString()
+        })
+        .eq('firebase_uid', user.uid);
+      
+      if (error) {
+        console.error('❌ Error saving filter preferences:', error);
+      } else {
+        console.log('✅ Filter preferences saved:', preferences);
+        setUserFilterPreferences(preferences);
+      }
+    } catch (error) {
+      console.error('❌ Error in saveFilterPreferences:', error);
+    }
+  };
+
+  // Load filter preferences from database
+  const loadFilterPreferences = async (): Promise<UserFilterPreferences | null> => {
+    const user = auth.currentUser;
+    if (!user) return null;
+    
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('user_filter_preferences')
+        .eq('firebase_uid', user.uid)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('❌ Error loading filter preferences:', error);
+        return null;
+      }
+      
+      if (data?.user_filter_preferences) {
+        console.log('✅ Loaded filter preferences:', data.user_filter_preferences);
+        setUserFilterPreferences(data.user_filter_preferences);
+        return data.user_filter_preferences;
+      }
+      return null;
+    } catch (error) {
+      console.error('❌ Error in loadFilterPreferences:', error);
+      return null;
+    }
+  };
+
+  // Clear filter preferences from database
+  const clearFilterPreferences = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          user_filter_preferences: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('firebase_uid', user.uid);
+      
+      if (error) {
+        console.error('❌ Error clearing filter preferences:', error);
+      } else {
+        console.log('✅ Filter preferences cleared');
+        setUserFilterPreferences(null);
+      }
+    } catch (error) {
+      console.error('❌ Error in clearFilterPreferences:', error);
+    }
+  };
+
+  // Load and apply saved filter preferences
+  const applySavedFilterPreferences = async () => {
+    const preferences = await loadFilterPreferences();
+    if (preferences?.lastActiveFilter) {
+      // Apply the saved filters
+      setFilters(prev => ({
+        ...prev,
+        ...preferences.lastActiveFilter
+      }));
+      console.log('✅ Restored filters from user preferences');
+      return true;
+    }
+    return false;
+  };
+  // === END ADDED ===
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -270,17 +574,45 @@ const Marketplace: React.FC = () => {
     }
   };
 
+  // === MODIFIED AUTH EFFECT: Added user sync and filter preferences ===
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         await fetchUserProfile(user.uid);
         loadUserNotifications(user.uid);
+        
+        // === ADDED: Perform user sync to Supabase ===
+        await performUserSync();
+        
+        // === ADDED: Load saved filter preferences ===
+        await applySavedFilterPreferences();
+        
       } else {
         setUserProfile(null);
       }
     });
     return () => unsubscribe();
+  }, []);
+
+  // === ADDED: Extra useEffect to ensure sync happens on page load ===
+  useEffect(() => {
+    // Run sync when component mounts
+    const initSync = async () => {
+      console.log("🔵 [Marketplace] Component mounted, checking for user sync...");
+      if (auth.currentUser) {
+        // Small delay to ensure auth is ready
+        setTimeout(async () => {
+          await performUserSync();
+          // Load filter preferences if not already loaded
+          if (!userFilterPreferences) {
+            await applySavedFilterPreferences();
+          }
+        }, 500);
+      }
+    };
+    
+    initSync();
   }, []);
 
   useEffect(() => {
@@ -315,6 +647,9 @@ const Marketplace: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // === ADDED: Perform user sync before loading other data ===
+      await performUserSync();
       
       await Promise.all([
         loadProductsWithDelivery(),
@@ -831,6 +1166,7 @@ useEffect(() => {
   fetchCartStatus();
 }, [currentUser, filteredProducts]); 
 
+  // === MODIFIED: Update filter function with auto-save ===
   const updateFilter = <K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     setFilters(prev => {
       const newFilters = { ...prev, [key]: value };
@@ -859,21 +1195,47 @@ useEffect(() => {
         }
       }
       
+      // === ADDED: Auto-save filter preferences with debounce ===
+      if (currentUser) {
+        // Clear any existing timeout
+        if (filterSaveTimeoutRef.current) {
+          clearTimeout(filterSaveTimeoutRef.current);
+        }
+        
+        // Set new timeout to save after 1.5 seconds of inactivity
+        filterSaveTimeoutRef.current = setTimeout(() => {
+          saveFilterPreferences(newFilters);
+        }, 1500);
+      }
+      // === END ADDED ===
+      
       return newFilters;
     });
   };
 
+  // === MODIFIED: Clear location filters with preference clearing ===
   const clearLocationFilters = () => {
-    setFilters(prev => ({
-      ...prev,
-      selectedState: '',
-      selectedUniversity: '',
-      selectedCampus: '',
-      selectedCategory: 'all',
-      selectedVendor: ''
-    }));
+    setFilters(prev => {
+      const newFilters = {
+        ...prev,
+        selectedState: '',
+        selectedUniversity: '',
+        selectedCampus: '',
+        selectedCategory: 'all',
+        selectedVendor: ''
+      };
+      
+      // === ADDED: Clear filter preferences from database ===
+      if (currentUser) {
+        clearFilterPreferences();
+      }
+      // === END ADDED ===
+      
+      return newFilters;
+    });
   };
 
+  // === MODIFIED: Handle location back with auto-save ===
   const handleLocationBack = () => {
     if (filters.selectedVendor && filters.selectedCategory !== 'all') {
       updateFilter('selectedVendor', '');
@@ -1498,7 +1860,7 @@ useEffect(() => {
                         className="location-option-button"
                         onClick={() => updateFilter('selectedVendor', vendor.vendor_id)}
                       >
-                        <UserIcon size={14} />
+                        <ShoppingCart size={14} /> <span style={{ visibility: 'hidden' }}>_ </span>
                         {vendor.shop_name}
                       </button>
                     ))
@@ -1509,8 +1871,8 @@ useEffect(() => {
           </div>
         </div>
 
-        {activeNotification && (
-          <div 
+        {/*{activeNotification && (
+           <div 
             className="system-notification"
             style={{
               backgroundColor: activeNotification.bg_color,
@@ -1518,7 +1880,7 @@ useEffect(() => {
             }}
           >
             <span className="notification-icon">{activeNotification.icon}</span>
-            <span className="notification-message">{activeNotification.message}</span>
+           <span className="notification-message">{activeNotification.message}</span>
             <button 
               className="notification-close"
               onClick={() => setSystemNotifications(prev => 
@@ -1528,7 +1890,7 @@ useEffect(() => {
               <X size={16} />
             </button>
           </div>
-        )}
+        )}*/}
 
         <main className="products-main">
           <div className="products-grid">
@@ -1742,6 +2104,9 @@ useEffect(() => {
                     conditionFilter: 'all',
                     sortBy: 'newest'
                   });
+                  
+                  // === ADDED: Clear filter preferences when clearing all filters ===
+                  clearFilterPreferences();
                 }}
 
                   style={{

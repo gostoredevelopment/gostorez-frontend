@@ -1489,7 +1489,7 @@ const UserDashboard: React.FC = () => {
                 <div className="userdashboard-empty-icon">
                   <Package size={32} />
                 </div>
-                <h4>No Orders Yet</h4>
+                <h4>Searching for orders...</h4>
                 <p>When you make purchases, your orders will appear here</p>
               </div>
             ) : (

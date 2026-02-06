@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { auth } from '../lib/firebase';
 import { supabase } from '../lib/supabaseClient';
-import { format, formatDistanceToNow, parseISO } from "date-fns";
+import { format, formatDistanceToNow, parseISO, isValid } from "date-fns";
 import { 
   ArrowLeft, 
   Send, 
@@ -33,7 +33,9 @@ import {
   Ban,
   Flag,
   VolumeX,
-  VideoOff
+  VideoOff,
+  Bell,
+  BellOff
 } from "lucide-react";
 import "./ChatRoom.css";
 
@@ -84,6 +86,8 @@ type RoomDetails = {
   unread_count: number;
   created_at: string;
   updated_at: string;
+  status_a?: 'online' | 'offline' | 'typing';
+  status_b?: 'online' | 'offline' | 'typing';
 };
 
 type Emoji = {
@@ -105,6 +109,13 @@ type SelectedMessage = {
 
 type CallType = 'voice' | 'video' | null;
 
+type Notification = {
+  id: string;
+  type: 'info' | 'success' | 'error' | 'warning';
+  message: string;
+  duration?: number;
+};
+
 export default function ChatRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -119,6 +130,8 @@ export default function ChatRoom() {
   const [otherParticipant, setOtherParticipant] = useState<Participant | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [otherIsTyping, setOtherIsTyping] = useState(false);
+  const [otherIsRecording, setOtherIsRecording] = useState(false);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -131,7 +144,6 @@ export default function ChatRoom() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   
-  // New state for message selection
   const [selectedMessages, setSelectedMessages] = useState<SelectedMessage[]>([]);
   const [isSelecting, setIsSelecting] = useState(false);
   const [replyToMessage, setReplyToMessage] = useState<SelectedMessage | null>(null);
@@ -141,6 +153,17 @@ export default function ChatRoom() {
   const [activeCall, setActiveCall] = useState<CallType>(null);
   const [callStatus, setCallStatus] = useState<'idle' | 'ringing' | 'connected' | 'ended'>('idle');
   
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [onlineStatus, setOnlineStatus] = useState<{is_online: boolean, last_seen: string}>({is_online: false, last_seen: ''});
+  const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  
+  const sentSoundRef = useRef<HTMLAudioElement | null>(null);
+  const receivedSoundRef = useRef<HTMLAudioElement | null>(null);
+  const typingSoundRef = useRef<HTMLAudioElement | null>(null);
+  const callSoundRef = useRef<HTMLAudioElement | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -149,8 +172,85 @@ export default function ChatRoom() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const onlineStatusRef = useRef<NodeJS.Timeout | null>(null);
+  const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoScrollRef = useRef<boolean>(true);
 
-  // Get Supabase user ID from Firebase UID
+  useEffect(() => {
+    sentSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3');
+    receivedSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
+    typingSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-select-click-1109.mp3');
+    callSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-phone-ring-3002.mp3');
+    
+    [sentSoundRef.current, receivedSoundRef.current, typingSoundRef.current, callSoundRef.current].forEach(audio => {
+      if (audio) audio.volume = 0.3;
+    });
+    
+    return () => {
+      [sentSoundRef.current, receivedSoundRef.current, typingSoundRef.current, callSoundRef.current].forEach(audio => {
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      });
+    };
+  }, []);
+
+  const playSound = (type: 'sent' | 'received' | 'typing' | 'call') => {
+    if (!audioEnabled) return;
+    
+    try {
+      switch(type) {
+        case 'sent':
+          if (sentSoundRef.current) {
+            sentSoundRef.current.currentTime = 0;
+            sentSoundRef.current.play().catch(() => {});
+          }
+          break;
+        case 'received':
+          if (receivedSoundRef.current) {
+            receivedSoundRef.current.currentTime = 0;
+            receivedSoundRef.current.play().catch(() => {});
+          }
+          break;
+        case 'typing':
+          if (typingSoundRef.current) {
+            typingSoundRef.current.currentTime = 0;
+            typingSoundRef.current.play().catch(() => {});
+          }
+          break;
+        case 'call':
+          if (callSoundRef.current) {
+            callSoundRef.current.currentTime = 0;
+            callSoundRef.current.loop = true;
+            callSoundRef.current.play().catch(() => {});
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Error playing sound:', error);
+    }
+  };
+
+  const stopCallSound = () => {
+    if (callSoundRef.current) {
+      callSoundRef.current.pause();
+      callSoundRef.current.currentTime = 0;
+      callSoundRef.current.loop = false;
+    }
+  };
+
+  const addNotification = (notification: Omit<Notification, 'id'>) => {
+    const id = Date.now().toString();
+    const newNotification: Notification = { ...notification, id };
+    setNotifications(prev => [...prev, newNotification]);
+    
+    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
+    notificationTimeoutRef.current = setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, notification.duration || 3000);
+  };
+
   const getSupabaseUserId = async (firebaseUid: string): Promise<string> => {
     try {
       const { data, error } = await supabase
@@ -168,7 +268,43 @@ export default function ChatRoom() {
     }
   };
 
-  // Fetch room details and identify other participant
+  const updateRoomStatus = async (status: 'online' | 'offline' | 'typing') => {
+    if (!supabaseUserId || !roomDetails) return;
+    
+    try {
+      const now = new Date().toISOString();
+      const isParticipantA = roomDetails.p_a === supabaseUserId;
+      
+      const updateData: any = {
+        updated_at: now
+      };
+      
+      if (isParticipantA) {
+        updateData.status_a = status;
+      } else {
+        updateData.status_b = status;
+      }
+      
+      await supabase
+        .from('rooms')
+        .update(updateData)
+        .eq('id', roomDetails.id);
+      
+      // Update local state
+      setRoomDetails(prev => {
+        if (!prev) return prev;
+        if (isParticipantA) {
+          return { ...prev, status_a: status, updated_at: now };
+        } else {
+          return { ...prev, status_b: status, updated_at: now };
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error updating room status:', error);
+    }
+  };
+
   const fetchRoomDetails = useCallback(async (userId: string) => {
     if (!roomId) return;
 
@@ -187,7 +323,6 @@ export default function ChatRoom() {
 
       setRoomDetails(roomData);
 
-      // Identify other participant
       const isParticipantA = roomData.p_a === userId;
       const otherParticipantId = isParticipantA ? roomData.p_b : roomData.p_a;
       
@@ -200,7 +335,6 @@ export default function ChatRoom() {
         last_seen: new Date().toISOString()
       };
 
-      // Get more details from users table
       try {
         const { data: otherUserData } = await supabase
           .from('users')
@@ -212,7 +346,11 @@ export default function ChatRoom() {
           participant.user_type = otherUserData.user_type || 'user';
           participant.firebase_uid = otherUserData.firebase_uid;
           participant.is_online = otherUserData.is_active;
-          participant.last_seen = otherUserData.last_seen;
+          participant.last_seen = otherUserData.last_seen || new Date().toISOString();
+          setOnlineStatus({
+            is_online: otherUserData.is_active || false,
+            last_seen: otherUserData.last_seen || new Date().toISOString()
+          });
         } else {
           if (roomData.chat_type === 'user_vendor' || roomData.chat_type === 'vendor_vendor') {
             participant.user_type = 'vendor';
@@ -222,7 +360,6 @@ export default function ChatRoom() {
         console.log("Could not fetch user details:", userFetchError);
       }
 
-      // If vendor, get shop details
       if (participant.user_type === 'vendor' && participant.firebase_uid) {
         try {
           const { data: shopData } = await supabase
@@ -244,11 +381,15 @@ export default function ChatRoom() {
 
     } catch (error: any) {
       console.error('Error fetching room details:', error);
-      setError('Failed to load chat details');
+      // Don't set error state to avoid disrupting chat flow
+      addNotification({
+        type: 'error',
+        message: 'Failed to load chat details',
+        duration: 3000
+      });
     }
   }, [roomId]);
 
-  // Fetch messages
   const fetchMessages = useCallback(async () => {
     if (!roomId) return;
 
@@ -261,26 +402,32 @@ export default function ChatRoom() {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
+      
+      const messageIds = data?.map(msg => msg.id) || [];
+      setSentMessageIds(new Set(messageIds));
       setMessages(data || []);
       
       await markMessagesAsRead();
       
     } catch (error: any) {
       console.error('Error fetching messages:', error);
-      setError('Failed to load messages');
+      addNotification({
+        type: 'error',
+        message: 'Failed to load messages',
+        duration: 3000
+      });
     } finally {
       setLoading(false);
     }
   }, [roomId]);
 
-  // Mark messages as read
   const markMessagesAsRead = async () => {
     if (!roomId || !supabaseUserId) return;
 
     try {
       const { data: unreadMessages } = await supabase
         .from('messages')
-        .select('id')
+        .select('id, sender_id')
         .eq('room_id', roomId)
         .neq('sender_id', supabaseUserId)
         .eq('is_read', false);
@@ -309,7 +456,6 @@ export default function ChatRoom() {
     }
   };
 
-  // Send message
   const sendMessage = async (type: 'text' | 'image' | 'voice' | 'file' = 'text', content?: any, fileName?: string, fileSize?: number) => {
     if (!roomId || !supabaseUserId || (!newMessage.trim() && type === 'text' && !content)) return;
 
@@ -320,15 +466,14 @@ export default function ChatRoom() {
         sender_id: supabaseUserId,
         message_type: type,
         message_text: type === 'text' ? newMessage : 
-                     type === 'image' ? '📷 Image' : 
-                     type === 'voice' ? '🎤 Voice message' : 
-                     '📄 File',
+                     type === 'image' ? '[Image]' : 
+                     type === 'voice' ? '[Voice message]' : 
+                     '[File]',
         is_read: false,
         delivered: false,
         created_at: new Date().toISOString()
       };
 
-      // Add reply metadata if replying to a message
       if (replyToMessage) {
         messageData.metadata = {
           ...messageData.metadata,
@@ -363,7 +508,6 @@ export default function ChatRoom() {
 
       if (error) throw error;
 
-      // Update room last message
       await supabase
         .from('rooms')
         .update({
@@ -373,37 +517,54 @@ export default function ChatRoom() {
         })
         .eq('id', roomId);
 
-      setMessages(prev => [...prev, data]);
+      setSentMessageIds(prev => new Set(Array.from(prev).concat(data.id)));
+      
+      setMessages(prev => {
+        if (prev.some(msg => msg.id === data.id)) {
+          return prev;
+        }
+        return [...prev, data];
+      });
+      
       if (type === 'text') {
         setNewMessage("");
         setReplyToMessage(null);
       }
 
-      // Clear selected file
       if (type === 'file') {
         setSelectedFile(null);
       }
 
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 100);
+      playSound('sent');
+      
+      updateRoomStatus('online');
+      setIsTyping(false);
+      
+      // Only auto-scroll if user is at the bottom
+      if (autoScrollRef.current) {
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      }
 
     } catch (error) {
       console.error('Error sending message:', error);
-      setError('Failed to send message');
+      addNotification({
+        type: 'error',
+        message: 'Failed to send message',
+        duration: 3000
+      });
     } finally {
       setSending(false);
     }
   };
 
-  // Handle text message send
   const handleSendMessage = () => {
     if (newMessage.trim()) {
       sendMessage('text');
     }
   };
 
-  // Handle key press for sending
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -411,7 +572,27 @@ export default function ChatRoom() {
     }
   };
 
-  // Handle image upload
+  const handleTyping = () => {
+    if (!isTyping) {
+      updateRoomStatus('typing');
+      setIsTyping(true);
+    }
+    
+    if (typingTimeout) clearTimeout(typingTimeout);
+    
+    const timeout = setTimeout(() => {
+      setIsTyping(false);
+      updateRoomStatus('online');
+    }, 2000);
+    
+    setTypingTimeout(timeout);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    handleTyping();
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -426,10 +607,14 @@ export default function ChatRoom() {
       sendMessage('image', base64, file.name, file.size);
     } catch (error) {
       console.error('Error uploading image:', error);
+      addNotification({
+        type: 'error',
+        message: 'Failed to upload image',
+        duration: 3000
+      });
     }
   };
 
-  // Handle file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -447,16 +632,20 @@ export default function ChatRoom() {
       sendMessage('file', base64, file.name, file.size);
     } catch (error) {
       console.error('Error uploading file:', error);
-      setError('Failed to upload file');
+      addNotification({
+        type: 'error',
+        message: 'Failed to upload file',
+        duration: 3000
+      });
       setSelectedFile(null);
     } finally {
       setUploadingFile(false);
     }
   };
 
-  // Start voice recording
   const startRecording = async () => {
     try {
+      updateRoomStatus('typing');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       const audioChunks: BlobPart[] = [];
@@ -477,6 +666,7 @@ export default function ChatRoom() {
         sendMessage('voice', base64, `voice_${Date.now()}.webm`);
         
         stream.getTracks().forEach(track => track.stop());
+        updateRoomStatus('online');
       };
 
       recorder.start();
@@ -490,11 +680,15 @@ export default function ChatRoom() {
 
     } catch (error) {
       console.error('Error starting recording:', error);
-      alert('Could not access microphone. Please check permissions.');
+      addNotification({
+        type: 'error',
+        message: 'Could not access microphone. Please check permissions.',
+        duration: 3000
+      });
+      updateRoomStatus('online');
     }
   };
 
-  // Stop voice recording
   const stopRecording = () => {
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
@@ -506,7 +700,6 @@ export default function ChatRoom() {
     }
   };
 
-  // Message selection handlers
   const handleMessageClick = (message: Message, event: React.MouseEvent) => {
     if (isSelecting) {
       const isSelected = selectedMessages.some(msg => msg.id === message.id);
@@ -581,42 +774,51 @@ export default function ChatRoom() {
     }
   };
 
-  // Message actions
   const handleCopyMessages = async () => {
     if (selectedMessages.length === 0) return;
     
     try {
       const textToCopy = selectedMessages.map(msg => {
-        if (msg.message_type === 'image') return '📷 [Image]';
-        if (msg.message_type === 'voice') return '🎤 [Voice message]';
-        if (msg.message_type === 'file') return `📄 [File: ${msg.file_name}]`;
+        if (msg.message_type === 'image') return '[Image]';
+        if (msg.message_type === 'voice') return '[Voice message]';
+        if (msg.message_type === 'file') return `[File: ${msg.file_name}]`;
         return msg.message_text;
       }).join('\n');
       
       await navigator.clipboard.writeText(textToCopy);
-      alert('Messages copied to clipboard!');
+      addNotification({
+        type: 'success',
+        message: `Copied ${selectedMessages.length} message(s) to clipboard`,
+        duration: 2000
+      });
       clearSelection();
     } catch (error) {
       console.error('Error copying messages:', error);
+      addNotification({
+        type: 'error',
+        message: 'Failed to copy messages',
+        duration: 3000
+      });
     }
   };
 
   const handleDeleteMessages = async () => {
     if (selectedMessages.length === 0) return;
     
-    if (!window.confirm(`Delete ${selectedMessages.length} selected message(s)?`)) return;
+    const myMessageIds = selectedMessages
+      .filter(msg => msg.sender_id === supabaseUserId)
+      .map(msg => msg.id);
+    
+    if (myMessageIds.length === 0) {
+      addNotification({
+        type: 'warning',
+        message: 'You can only delete your own messages',
+        duration: 3000
+      });
+      return;
+    }
     
     try {
-      // Only delete messages sent by current user
-      const myMessageIds = selectedMessages
-        .filter(msg => msg.sender_id === supabaseUserId)
-        .map(msg => msg.id);
-      
-      if (myMessageIds.length === 0) {
-        alert('You can only delete your own messages');
-        return;
-      }
-      
       const { error } = await supabase
         .from('messages')
         .delete()
@@ -624,13 +826,22 @@ export default function ChatRoom() {
       
       if (error) throw error;
       
-      // Remove deleted messages from state
       setMessages(prev => prev.filter(msg => !myMessageIds.includes(msg.id)));
+      
+      addNotification({
+        type: 'success',
+        message: `Deleted ${myMessageIds.length} message(s)`,
+        duration: 2000
+      });
+      
       clearSelection();
-      alert('Messages deleted successfully!');
     } catch (error) {
       console.error('Error deleting messages:', error);
-      alert('Failed to delete messages');
+      addNotification({
+        type: 'error',
+        message: 'Failed to delete messages',
+        duration: 3000
+      });
     }
   };
 
@@ -639,41 +850,51 @@ export default function ChatRoom() {
     
     try {
       const shareText = selectedMessages.map(msg => {
-        if (msg.message_type === 'image') return '📷 [Image]';
-        if (msg.message_type === 'voice') return '🎤 [Voice message]';
-        if (msg.message_type === 'file') return `📄 [File: ${msg.file_name}]`;
+        if (msg.message_type === 'image') return '[Image]';
+        if (msg.message_type === 'voice') return '[Voice message]';
+        if (msg.message_type === 'file') return `[File: ${msg.file_name}]`;
         return msg.message_text;
       }).join('\n\n');
       
-      // First copy to clipboard
       await navigator.clipboard.writeText(shareText);
       
-      // Try Web Share API
       if (navigator.share) {
         await navigator.share({
           title: 'Messages from chat',
           text: shareText,
           url: window.location.href
         });
+        addNotification({
+          type: 'success',
+          message: 'Messages shared successfully',
+          duration: 2000
+        });
       } else {
-        alert('Messages copied! You can now paste them anywhere.');
+        addNotification({
+          type: 'success',
+          message: 'Messages copied! You can now paste them anywhere.',
+          duration: 2000
+        });
       }
       
       clearSelection();
     } catch (error) {
       console.error('Error sharing messages:', error);
+      addNotification({
+        type: 'error',
+        message: 'Failed to share messages',
+        duration: 3000
+      });
     }
   };
 
   const handleReplyToMessage = () => {
     if (selectedMessages.length === 0) return;
     
-    // Use the last selected message for reply
     const messageToReply = selectedMessages[selectedMessages.length - 1];
     setReplyToMessage(messageToReply);
     clearSelection();
     
-    // Focus the input
     if (inputRef.current) {
       inputRef.current.focus();
     }
@@ -688,7 +909,6 @@ export default function ChatRoom() {
     setIsSelecting(false);
   };
 
-  // Call functions using Supabase Realtime
   const startCall = async (type: CallType) => {
     if (!roomId || !supabaseUserId || !otherParticipant) return;
     
@@ -696,8 +916,9 @@ export default function ChatRoom() {
     setCallStatus('ringing');
     setShowCallOptions(false);
     
+    playSound('call');
+    
     try {
-      // Create a call record in database
       const callData = {
         room_id: roomId,
         caller_id: supabaseUserId,
@@ -715,40 +936,56 @@ export default function ChatRoom() {
       
       if (error) throw error;
       
-      // Start call timer
       if (callTimerRef.current) clearTimeout(callTimerRef.current);
       callTimerRef.current = setTimeout(() => {
         if (callStatus === 'ringing') {
           endCall();
-          alert('Call not answered');
+          addNotification({
+            type: 'warning',
+            message: 'Call not answered',
+            duration: 3000
+          });
         }
-      }, 30000); // 30 second timeout
+      }, 30000);
       
     } catch (error) {
       console.error('Error starting call:', error);
       setActiveCall(null);
       setCallStatus('idle');
+      stopCallSound();
+      addNotification({
+        type: 'error',
+        message: 'Failed to start call',
+        duration: 3000
+      });
     }
   };
 
   const answerCall = async () => {
     setCallStatus('connected');
+    stopCallSound();
     
     if (callTimerRef.current) {
       clearTimeout(callTimerRef.current);
     }
+    
+    addNotification({
+      type: 'success',
+      message: 'Call connected',
+      duration: 2000
+    });
   };
 
   const endCall = () => {
     setActiveCall(null);
     setCallStatus('ended');
+    stopCallSound();
     
     if (callTimerRef.current) {
       clearTimeout(callTimerRef.current);
       callTimerRef.current = null;
     }
     
-    // Update call status in database
     if (roomId) {
       supabase
         .from('calls')
@@ -761,11 +998,8 @@ export default function ChatRoom() {
     }
   };
 
-  // Block user
   const handleBlockUser = async () => {
     if (!otherParticipant || !supabaseUserId) return;
-    
-    if (!window.confirm(`Block ${otherParticipant.name}? You won't receive messages from them.`)) return;
     
     try {
       const { error } = await supabase
@@ -778,42 +1012,35 @@ export default function ChatRoom() {
       
       if (error) throw error;
       
-      alert(`${otherParticipant.name} has been blocked`);
-      navigate('/chats');
+      addNotification({
+        type: 'success',
+        message: `${otherParticipant.name} has been blocked`,
+        duration: 3000
+      });
+      
+      setTimeout(() => {
+        navigate('/chats');
+      }, 1500);
     } catch (error) {
       console.error('Error blocking user:', error);
-      alert('Failed to block user');
+      addNotification({
+        type: 'error',
+        message: 'Failed to block user',
+        duration: 3000
+      });
     }
   };
 
-  // Report user
   const handleReportUser = async () => {
     if (!otherParticipant || !supabaseUserId) return;
     
-    const reason = prompt(`Why are you reporting ${otherParticipant.name}?`);
-    if (!reason) return;
-    
-    try {
-      const { error } = await supabase
-        .from('reports')
-        .insert([{
-          reporter_id: supabaseUserId,
-          reported_id: otherParticipant.id,
-          reason: reason,
-          room_id: roomId,
-          created_at: new Date().toISOString()
-        }]);
-      
-      if (error) throw error;
-      
-      alert('Thank you for your report. We will review it shortly.');
-    } catch (error) {
-      console.error('Error reporting user:', error);
-      alert('Failed to submit report');
-    }
+    addNotification({
+      type: 'info',
+      message: 'Report feature would open a form in production',
+      duration: 3000
+    });
   };
 
-  // Load emojis
   const loadEmojis = async () => {
     try {
       const { data, error } = await supabase
@@ -848,7 +1075,6 @@ export default function ChatRoom() {
     setFilteredEmojis(defaultEmojis);
   };
 
-  // Filter emojis based on search
   useEffect(() => {
     if (!emojiSearch.trim()) {
       setFilteredEmojis(emojis);
@@ -867,15 +1093,14 @@ export default function ChatRoom() {
     if (inputRef.current) {
       inputRef.current.focus();
     }
+    handleTyping();
   };
 
-  // Format time for display
   const formatTime = (timestamp: string) => {
     const date = parseISO(timestamp);
     return format(date, 'h:mm a');
   };
 
-  // Format date for grouping
   const formatDate = (timestamp: string) => {
     const date = parseISO(timestamp);
     const today = new Date();
@@ -891,7 +1116,29 @@ export default function ChatRoom() {
     }
   };
 
-  // Group messages by date
+  const getStatusText = () => {
+    if (!roomDetails || !supabaseUserId) return 'offline';
+    
+    const isParticipantA = roomDetails.p_a === supabaseUserId;
+    const otherStatus = isParticipantA ? roomDetails.status_b : roomDetails.status_a;
+    
+    if (otherStatus === 'typing') {
+      return 'typing...';
+    } else if (otherStatus === 'online') {
+      return 'online';
+    } else if (onlineStatus.last_seen) {
+      try {
+        const date = parseISO(onlineStatus.last_seen);
+        if (isValid(date)) {
+          return `last seen ${formatDistanceToNow(date)} ago`;
+        }
+      } catch (error) {
+        console.error('Error formatting last seen:', error);
+      }
+    }
+    return 'offline';
+  };
+
   const groupMessagesByDate = () => {
     const groups: { [key: string]: Message[] } = {};
     
@@ -906,7 +1153,6 @@ export default function ChatRoom() {
     return groups;
   };
 
-  // Format file size
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -915,7 +1161,24 @@ export default function ChatRoom() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Handle user authentication
+  // Handle scroll position
+  const handleScroll = () => {
+    if (!messagesContainerRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
+    
+    autoScrollRef.current = isAtBottom;
+  };
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       setUser(currentUser);
@@ -923,28 +1186,29 @@ export default function ChatRoom() {
         try {
           const supabaseId = await getSupabaseUserId(currentUser.uid);
           setSupabaseUserId(supabaseId);
+          if (roomDetails) {
+            updateRoomStatus('online');
+          }
         } catch (error) {
           console.error('Auth error:', error);
-          navigate('/login');
+          navigate('/');
         }
       } else {
-        navigate('/login');
+        navigate('/');
       }
     });
 
     return () => unsubscribe();
-  }, [navigate]);
+  }, [navigate, roomDetails]);
 
-  // Fetch data and set up realtime
   useEffect(() => {
     if (roomId && supabaseUserId) {
       fetchRoomDetails(supabaseUserId);
       fetchMessages();
       loadEmojis();
       
-      // Listen for new messages
-      const channel = supabase
-        .channel(`room:${roomId}`)
+      const messagesChannel = supabase
+        .channel(`room_messages:${roomId}`)
         .on('postgres_changes', 
           { 
             event: 'INSERT', 
@@ -955,25 +1219,67 @@ export default function ChatRoom() {
           (payload) => {
             const newMessage = payload.new as Message;
             
-            setMessages(prev => {
-              if (prev.some(msg => msg.id === newMessage.id)) {
-                return prev;
+            // Convert Set to Array for iteration
+            const sentMessageIdsArray = Array.from(sentMessageIds);
+            if (!sentMessageIdsArray.includes(newMessage.id)) {
+              setMessages(prev => {
+                if (prev.some(msg => msg.id === newMessage.id)) {
+                  return prev;
+                }
+                return [...prev, newMessage];
+              });
+              
+              if (newMessage.sender_id !== supabaseUserId) {
+                playSound('received');
+                markMessagesAsRead();
+                
+                // Auto-scroll for new received messages
+                setTimeout(() => {
+                  if (autoScrollRef.current) {
+                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                  }
+                }, 100);
               }
-              return [...prev, newMessage];
-            });
-            
-            if (newMessage.sender_id !== supabaseUserId) {
-              markMessagesAsRead();
             }
-            
-            setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            }, 100);
           }
         )
         .subscribe();
 
-      // Listen for calls
+      const updatesChannel = supabase
+        .channel(`message_updates:${roomId}`)
+        .on('postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `room_id=eq.${roomId}`
+          },
+          (payload) => {
+            const updatedMessage = payload.new as Message;
+            
+            setMessages(prev => prev.map(msg => 
+              msg.id === updatedMessage.id ? updatedMessage : msg
+            ));
+          }
+        )
+        .subscribe();
+
+      const roomChannel = supabase
+        .channel(`room_updates:${roomId}`)
+        .on('postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'rooms',
+            filter: `id=eq.${roomId}`
+          },
+          (payload) => {
+            const updatedRoom = payload.new as RoomDetails;
+            setRoomDetails(updatedRoom);
+          }
+        )
+        .subscribe();
+
       const callChannel = supabase
         .channel(`calls:${roomId}`)
         .on('postgres_changes',
@@ -989,48 +1295,66 @@ export default function ChatRoom() {
               setActiveCall(call.call_type);
               setCallStatus('ringing');
               setShowCallOptions(false);
+              playSound('call');
             }
           }
         )
         .subscribe();
 
+      // Clean up old status
+      const cleanupOldStatus = () => {
+        if (roomDetails && supabaseUserId) {
+          const isParticipantA = roomDetails.p_a === supabaseUserId;
+          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          
+          if (roomDetails.updated_at && roomDetails.updated_at < fiveMinutesAgo) {
+            updateRoomStatus('offline');
+          }
+        }
+      };
+
+      onlineStatusRef.current = setInterval(() => {
+        if (otherParticipant?.id) {
+          supabase
+            .from('users')
+            .select('is_active, last_seen')
+            .eq('id', otherParticipant.id)
+            .single()
+            .then(({ data }) => {
+              if (data) {
+                setOnlineStatus({
+                  is_online: data.is_active || false,
+                  last_seen: data.last_seen || new Date().toISOString()
+                });
+              }
+            });
+        }
+        cleanupOldStatus();
+      }, 30000);
+
       return () => {
-        supabase.removeChannel(channel);
+        supabase.removeChannel(messagesChannel);
+        supabase.removeChannel(updatesChannel);
+        supabase.removeChannel(roomChannel);
         supabase.removeChannel(callChannel);
+        if (onlineStatusRef.current) {
+          clearInterval(onlineStatusRef.current);
+        }
+        if (roomDetails && supabaseUserId) {
+          updateRoomStatus('offline');
+        }
       };
     }
-  }, [roomId, supabaseUserId]);
+  }, [roomId, supabaseUserId, otherParticipant?.id, sentMessageIds, roomDetails]);
 
-  // Auto-scroll when messages change
   useEffect(() => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  }, [messages]);
-
-  // Handle typing indicator
-  useEffect(() => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    if (newMessage) {
-      setIsTyping(true);
-      typingTimeoutRef.current = setTimeout(() => {
-        setIsTyping(false);
-      }, 1000);
-    } else {
-      setIsTyping(false);
-    }
-
     return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
       }
     };
-  }, [newMessage]);
+  }, [typingTimeout]);
 
-  // Close emoji picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
@@ -1042,9 +1366,19 @@ export default function ChatRoom() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Cleanup timers
   useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (roomDetails && supabaseUserId) {
+        updateRoomStatus('offline');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      handleBeforeUnload();
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
       }
@@ -1057,10 +1391,18 @@ export default function ChatRoom() {
       if (callTimerRef.current) {
         clearTimeout(callTimerRef.current);
       }
+      if (onlineStatusRef.current) {
+        clearInterval(onlineStatusRef.current);
+      }
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
+      }
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
+      }
     };
-  }, [mediaRecorder, isRecording, longPressTimer]);
+  }, [mediaRecorder, isRecording, longPressTimer, typingTimeout, roomDetails, supabaseUserId]);
 
-  // Click outside to clear selection
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (isSelecting && !event.defaultPrevented) {
@@ -1084,38 +1426,43 @@ export default function ChatRoom() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="chatroom-error">
-        <AlertCircle size={24} />
-        <p>{error}</p>
-        <button 
-          className="chatroom-retry"
-          onClick={() => {
-            setError(null);
-            if (supabaseUserId) {
-              fetchRoomDetails(supabaseUserId);
-              fetchMessages();
-            }
-          }}
-        >
-          Retry
-        </button>
-        <button 
-          className="chatroom-back-btn"
-          onClick={() => navigate('/chats')}
-        >
-          Back to Chats
-        </button>
-      </div>
-    );
-  }
-
   const messageGroups = groupMessagesByDate();
 
   return (
     <div className="chatroom-container">
-      {/* Header */}
+      <div className="chatroom-notifications">
+        {notifications.map((notification) => (
+          <div 
+            key={notification.id} 
+            className={`chatroom-notification chatroom-notification-${notification.type}`}
+          >
+            <div className="chatroom-notification-content">
+              {notification.type === 'success' && <Check size={14} />}
+              {notification.type === 'error' && <AlertCircle size={14} />}
+              {notification.type === 'warning' && <AlertCircle size={14} />}
+              {notification.type === 'info' && <Info size={14} />}
+              <span>{notification.message}</span>
+            </div>
+            <button 
+              className="chatroom-notification-close"
+              onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="chatroom-audio-toggle">
+        <button 
+          className={`chatroom-audio-btn ${audioEnabled ? 'enabled' : 'disabled'}`}
+          onClick={() => setAudioEnabled(!audioEnabled)}
+          title={audioEnabled ? "Mute sounds" : "Enable sounds"}
+        >
+          {audioEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
+        </button>
+      </div>
+
       <div className="chatroom-header">
         <div className="chatroom-header-left">
           <button 
@@ -1141,7 +1488,7 @@ export default function ChatRoom() {
                   {otherParticipant?.user_type === 'vendor' ? <Store size={12} /> : <User size={12} />}
                 </div>
               )}
-              {otherParticipant?.is_online && (
+              {getStatusText() === 'online' && (
                 <div className="chatroom-online"></div>
               )}
             </div>
@@ -1151,22 +1498,13 @@ export default function ChatRoom() {
                 {otherParticipant?.shop_name || otherParticipant?.name || 'Unknown'}
               </h2>
               <p className="chatroom-userstatus">
-                {isTyping ? (
-                  <span className="chatroom-typing">typing...</span>
-                ) : otherParticipant?.is_online ? (
-                  <span className="chatroom-online-text">online</span>
-                ) : otherParticipant?.last_seen ? (
-                  `last seen ${formatDistanceToNow(parseISO(otherParticipant.last_seen))} ago`
-                ) : (
-                  'offline'
-                )}
+                {getStatusText()}
               </p>
             </div>
           </div>
         </div>
 
         <div className="chatroom-header-right">
-          {/* Selection mode actions */}
           {isSelecting ? (
             <>
               <div className="chatroom-selection-count">
@@ -1210,7 +1548,6 @@ export default function ChatRoom() {
             </>
           ) : (
             <>
-              {/* Normal mode */}
               {callStatus === 'idle' && (
                 <>
                   <button 
@@ -1291,7 +1628,6 @@ export default function ChatRoom() {
         </div>
       </div>
 
-      {/* Reply Preview */}
       {replyToMessage && (
         <div className="chatroom-reply-preview">
           <div className="chatroom-reply-preview-content">
@@ -1300,17 +1636,17 @@ export default function ChatRoom() {
                 {replyToMessage.sender_id === supabaseUserId ? 'You' : otherParticipant?.name}
               </span>
               <span className="chatroom-reply-preview-type">
-                {replyToMessage.message_type === 'image' ? '📷 Image' : 
-                 replyToMessage.message_type === 'voice' ? '🎤 Voice' : 
-                 replyToMessage.message_type === 'file' ? '📄 File' : 'Text'}
+                {replyToMessage.message_type === 'image' ? '[Image]' : 
+                 replyToMessage.message_type === 'voice' ? '[Voice]' : 
+                 replyToMessage.message_type === 'file' ? '[File]' : 'Text'}
               </span>
             </div>
             <div className="chatroom-reply-preview-message">
               {replyToMessage.message_type === 'text' 
                 ? replyToMessage.message_text
-                : replyToMessage.message_type === 'image' ? '📷 Image' 
-                : replyToMessage.message_type === 'voice' ? '🎤 Voice message'
-                : `📄 ${replyToMessage.file_name}`}
+                : replyToMessage.message_type === 'image' ? '[Image]' 
+                : replyToMessage.message_type === 'voice' ? '[Voice message]'
+                : `[File: ${replyToMessage.file_name}]`}
             </div>
           </div>
           <button 
@@ -1323,7 +1659,6 @@ export default function ChatRoom() {
         </div>
       )}
 
-      {/* Messages Area */}
       <div 
         className="chatroom-messages" 
         ref={messagesContainerRef}
@@ -1366,7 +1701,6 @@ export default function ChatRoom() {
                   )}
                   
                   <div className={`chatroom-bubble ${isOwnMessage ? 'own' : 'other'}`}>
-                    {/* Reply indicator */}
                     {message.metadata?.reply_to && (
                       <div className="chatroom-reply-indicator">
                         <div className="chatroom-reply-indicator-line"></div>
@@ -1463,7 +1797,6 @@ export default function ChatRoom() {
                     </div>
                   </div>
                   
-                  {/* Selection checkbox */}
                   {isSelecting && (
                     <div className="chatroom-message-checkbox">
                       <div className={`chatroom-checkbox ${isSelected ? 'checked' : ''}`}>
@@ -1480,7 +1813,6 @@ export default function ChatRoom() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* File Preview */}
       {selectedFile && (
         <div className="chatroom-file-preview">
           <div className="chatroom-file-preview-content">
@@ -1502,7 +1834,6 @@ export default function ChatRoom() {
         </div>
       )}
 
-      {/* Emoji Picker */}
       {showEmojiPicker && (
         <div className="chatroom-emoji-picker" ref={emojiPickerRef}>
           <div className="chatroom-emoji-search">
@@ -1548,7 +1879,6 @@ export default function ChatRoom() {
         </div>
       )}
 
-      {/* Input Area */}
       <div className="chatroom-input">
         <div className="chatroom-input-left">
           <button 
@@ -1617,7 +1947,7 @@ export default function ChatRoom() {
             ref={inputRef}
             type="text"
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={handleInputChange}
             onKeyPress={handleKeyPress}
             placeholder="Type a message..."
             className="chatroom-input-field"
@@ -1650,7 +1980,6 @@ export default function ChatRoom() {
         </div>
       </div>
 
-      {/* Info Panel */}
       {showInfoPanel && roomDetails && (
         <div className="chatroom-info">
           <div className="chatroom-info-header">
@@ -1684,7 +2013,7 @@ export default function ChatRoom() {
                     {otherParticipant?.user_type === 'vendor' ? 'Shop' : 'User'}
                   </span>
                   <span className="chatroom-info-status">
-                    {otherParticipant?.is_online ? '🟢 Online' : '⚫ Offline'}
+                    {getStatusText()}
                   </span>
                 </div>
               </div>
