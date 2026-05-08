@@ -1,0 +1,499 @@
+/* Money.css - Compact, max spacing 3px, brand colors */
+
+.money-container {
+  background: #f8f9fa;
+  min-height: 100vh;
+  font-size: 12px;
+  padding: 3px;
+  padding-top: 44px;
+}
+
+/* Header */
+.money-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: #9B4819;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 3px;
+  z-index: 100;
+}
+.money-back-btn, .money-refresh-btn {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.money-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+}
+
+/* Balance Card */
+.money-balance-card {
+  background: white;
+  border-radius: 4px;
+  padding: 6px;
+  margin-bottom: 3px;
+  border: 1px solid #e0d6cc;
+}
+.money-balance-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 3px;
+}
+.money-balance-label {
+  font-size: 10px;
+  color: #666;
+}
+.money-balance-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: #9B4819;
+}
+.money-balance-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 3px;
+  margin-bottom: 3px;
+}
+.money-breakdown-item {
+  background: #f9f1eb;
+  padding: 2px 4px;
+  border-radius: 10px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.money-balance-pending {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #f59e0b;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 3px;
+}
+
+/* Tabs */
+.money-tabs {
+  display: flex;
+  gap: 1px;
+  background: #e0d6cc;
+  padding: 1px;
+  border-radius: 4px;
+  margin-bottom: 3px;
+}
+.money-tab {
+  flex: 1;
+  background: white;
+  border: none;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.money-tab.active {
+  background: #9B4819;
+  color: white;
+}
+
+/* Messages */
+.money-error, .money-success {
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+.money-error { background: #fee2e2; color: #dc2626; border-left: 2px solid #dc2626; }
+.money-success { background: #dcfce7; color: #16a34a; border-left: 2px solid #16a34a; }
+.money-error button, .money-success button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Tab Content */
+.money-tab-content {
+  background: white;
+  border-radius: 4px;
+  padding: 6px;
+  border: 1px solid #e0d6cc;
+}
+
+/* Overview */
+.money-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px;
+  margin-bottom: 6px;
+}
+.money-stat-card {
+  background: #f9f1eb;
+  padding: 6px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.money-stat-card div { display: flex; flex-direction: column; }
+.money-stat-card span { font-size: 9px; color: #666; }
+.money-stat-card strong { font-size: 14px; font-weight: 700; color: #333; }
+.money-recent h3 { font-size: 11px; margin: 0 0 3px 0; color: #333; }
+.money-recent-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 10px;
+}
+.money-recent-item div { display: flex; align-items: center; gap: 4px; }
+
+/* Forms */
+.money-form-group {
+  margin-bottom: 6px;
+}
+.money-form-group label {
+  display: block;
+  font-size: 9px;
+  color: #666;
+  margin-bottom: 2px;
+}
+.money-form-group input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #e0d6cc;
+  border-radius: 3px;
+  font-size: 10px;
+  box-sizing: border-box;
+}
+.money-submit-btn {
+  background: #9B4819;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  width: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.money-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Deposit */
+.money-warning {
+  background: #fef3c7;
+  border-left: 2px solid #f59e0b;
+  padding: 6px;
+  font-size: 9px;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  border-radius: 3px;
+}
+.money-manual-account {
+  background: #f9f1eb;
+  padding: 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+.money-account-details {
+  font-size: 10px;
+  margin: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.money-account-details button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.money-upload-area {
+  border: 1px dashed #e0d6cc;
+  border-radius: 3px;
+  padding: 8px;
+  text-align: center;
+  cursor: pointer;
+  background: #fefefe;
+}
+.money-upload-area img {
+  max-width: 100%;
+  max-height: 80px;
+  object-fit: contain;
+}
+.money-upload-area input { display: none; }
+
+/* Records */
+.money-records h4 {
+  font-size: 11px;
+  margin: 6px 0 3px 0;
+  color: #333;
+}
+.money-record-item {
+  background: #f8f9fa;
+  border-radius: 3px;
+  padding: 4px 6px;
+  margin-bottom: 3px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.money-record-item > div:first-child {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.money-status {
+  font-size: 8px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  text-transform: uppercase;
+}
+.money-status.pending { background: #fef3c7; color: #d97706; }
+.money-status.approved { background: #dcfce7; color: #16a34a; }
+.money-status.rejected, .money-status.cancelled { background: #fee2e2; color: #dc2626; }
+.money-cancel-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  font-size: 8px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+
+/* Transactions */
+.money-transactions-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.money-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: #f8f9fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.money-filter-group select {
+  border: none;
+  background: none;
+  font-size: 10px;
+  padding: 2px;
+}
+.money-transactions-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.money-transaction-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.money-tx-icon { width: 24px; text-align: center; }
+.money-tx-details { flex: 1; }
+.money-tx-desc { font-size: 10px; font-weight: 500; color: #333; }
+.money-tx-meta { display: flex; gap: 6px; font-size: 8px; color: #999; }
+.money-tx-amount { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.money-green { color: #16a34a; }
+.money-red { color: #dc2626; }
+.money-blue { color: #3b82f6; }
+
+/* Modal */
+.money-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+.money-modal-content {
+  background: white;
+  border-radius: 4px;
+  padding: 12px;
+  max-width: 260px;
+  width: 90%;
+}
+.money-modal-content h4 { margin: 0 0 6px 0; font-size: 12px; }
+.money-modal-content p { font-size: 10px; margin-bottom: 12px; }
+.money-modal-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.money-modal-actions button {
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: none;
+  font-size: 10px;
+  cursor: pointer;
+}
+.money-modal-actions button:first-child { background: #e0d6cc; }
+.money-danger { background: #dc2626; color: white; }
+
+/* Loader */
+.money-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+.money-spinner {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.money-empty {
+  font-size: 10px;
+  color: #999;
+  text-align: center;
+  padding: 12px;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .money-stats-grid { grid-template-columns: 1fr; }
+}
+
+
+
+/* Receipt upload area styles */
+.money-upload-area {
+  border: 2px dashed #dee2e6;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #f8f9fa;
+}
+
+.money-upload-area:hover {
+  border-color: #9B4819;
+  background: #fff8f0;
+}
+
+.money-upload-area img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.money-upload-area svg {
+  color: #6c757d;
+  margin-bottom: 8px;
+}
+
+.money-upload-area span {
+  display: block;
+  font-size: 13px;
+  color: #6c757d;
+}
+
+/* Receipt preview in modal */
+.money-transaction-details-print img {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 4px;
+  background: white;
+  max-width: 100%;
+}
+
+/* Transaction details modal */
+.money-modal-content-large {
+  max-width: 600px;
+  width: 90%;
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+}
+
+.money-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.money-transaction-details-print table td {
+  padding: 8px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.money-transaction-details-print table td:first-child {
+  font-weight: 600;
+  width: 40%;
+}
+
+
+/* New action buttons (max spacing 3px) */
+.money-action-buttons {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+.money-action-btn {
+  flex: 1;
+  background: #9B4819;
+  border: none;
+  padding: 6px 0;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.money-action-btn:active {
+  opacity: 0.8;
+}

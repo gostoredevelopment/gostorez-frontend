@@ -2893,3 +2893,176 @@
 .userdashboard-review-header button:hover {
   background: rgba(155, 72, 25, 0.1);
 }
+
+
+
+/* Additional CSS for Balance Actions - NO SHRINKING */
+.userdashboard-balance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.userdashboard-fund-btn,
+.userdashboard-transfer-btn,
+.userdashboard-eye-btn {
+  border-radius: 20px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.userdashboard-fund-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  min-width: 70px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.userdashboard-transfer-btn {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  min-width: 75px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.userdashboard-eye-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  padding: 0;
+  min-width: 28px;
+}
+
+/* Icons - NEVER shrink */
+.userdashboard-fund-btn svg,
+.userdashboard-transfer-btn svg,
+.userdashboard-eye-btn svg {
+  flex-shrink: 0;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px;
+  min-height: 14px;
+}
+
+/* Text - NEVER shrink */
+.userdashboard-fund-btn span,
+.userdashboard-transfer-btn span {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.userdashboard-fund-btn:hover,
+.userdashboard-transfer-btn:hover,
+.userdashboard-eye-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.userdashboard-fund-btn:active,
+.userdashboard-transfer-btn:active,
+.userdashboard-eye-btn:active {
+  transform: translateY(0px);
+}
+
+/* ALL SCREEN SIZES - NO SHRINKING WHATSOEVER */
+@media (max-width: 480px) {
+  .userdashboard-balance-actions {
+    gap: 5px;
+  }
+  
+  .userdashboard-fund-btn {
+    min-width: 70px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 10px;
+  }
+  
+  .userdashboard-transfer-btn {
+    min-width: 75px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 10px;
+  }
+  
+  .userdashboard-eye-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+  }
+  
+  .userdashboard-fund-btn svg,
+  .userdashboard-transfer-btn svg,
+  .userdashboard-eye-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  
+  .userdashboard-fund-btn span,
+  .userdashboard-transfer-btn span {
+    font-size: 10px;
+  }
+}
+
+/* Even the smallest screens - STILL NO SHRINKING */
+@media (max-width: 360px) {
+  .userdashboard-balance-actions {
+    gap: 4px;
+  }
+  
+  .userdashboard-fund-btn {
+    min-width: 70px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+  
+  .userdashboard-transfer-btn {
+    min-width: 75px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+  
+  .userdashboard-eye-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+  }
+  
+  .userdashboard-fund-btn svg,
+  .userdashboard-transfer-btn svg,
+  .userdashboard-eye-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  
+  .userdashboard-fund-btn span,
+  .userdashboard-transfer-btn span {
+    font-size: 10px;
+  }
+}
+
+/* Allow wrapping on very small screens, but elements NEVER shrink */
+@media (max-width: 320px) {
+  .userdashboard-balance-actions {
+    flex-wrap: wrap;
+  }
+}
+
+

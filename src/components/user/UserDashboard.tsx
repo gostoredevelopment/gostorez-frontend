@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { auth } from '../../lib/firebase';
 import { supabase } from '../../lib/supabaseClient';
 import { onAuthStateChanged } from 'firebase/auth';
+import { notificationService } from '../../services/notificationService'; 
+
 import {
   Bell,
   ShoppingCart,
@@ -56,6 +58,157 @@ import {
   Plus
 } from 'lucide-react';
 import './UserDashboard.css';
+
+// ========== NOTIFICATION FUNCTIONS ADDED ==========
+const getVendorDetails = async (vendorId: string): Promise<{ firebaseUid: string | null; businessEmail: string | null; shopName: string | null }> => {
+  try {
+    console.log('🔍 Getting vendor details for vendor:', vendorId);
+    
+    const { data: vendorProfile, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('user_id, business_email, shop_name')
+      .eq('vendor_id', vendorId)
+      .maybeSingle();
+
+    if (vendorError) {
+      console.error('❌ Error fetching vendor profile:', vendorError);
+    }
+
+    if (vendorProfile) {
+      console.log('✅ Found vendor profile:', vendorProfile);
+      return {
+        firebaseUid: vendorProfile.user_id,
+        businessEmail: vendorProfile.business_email,
+        shopName: vendorProfile.shop_name || 'Shop'
+      };
+    }
+
+    console.warn('⚠️ No vendor profile found for vendor_id:', vendorId);
+    return { firebaseUid: null, businessEmail: null, shopName: null };
+
+  } catch (error) {
+    console.error('❌ Error in getVendorDetails:', error);
+    return { firebaseUid: null, businessEmail: null, shopName: null };
+  }
+};
+
+const getCurrentUserName = async (): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) return 'A user';
+
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('name')
+      .eq('firebase_uid', user.uid)
+      .maybeSingle();
+    
+    return data?.name || user.displayName || 'A user';
+  } catch {
+    return user.displayName || 'A user';
+  }
+};
+
+const sendVendorNotification = async (
+  vendorId: string,
+  userName: string,
+  productName: string,
+  shopName: string,
+  action: 'ping' | 'cancelled' | 'received',
+  reason?: string
+) => {
+  try {
+    console.log(`📢 Sending ${action} notification to vendor:`, vendorId);
+    
+    const vendorDetails = await getVendorDetails(vendorId);
+    
+    if (!vendorDetails.firebaseUid) {
+      console.warn('⚠️ Could not find vendor Firebase UID for:', vendorId);
+      return;
+    }
+
+    let notificationTitle = '';
+    let notificationBody = '';
+
+    switch (action) {
+      case 'ping':
+        notificationTitle = `⏰ Order Reminder ${shopName}`;
+        notificationBody = `Remember my order! ${userName} ordered ${productName} at ${shopName}`;
+        break;
+      case 'cancelled':
+        notificationTitle = `❌ Order Cancelled!! ${shopName}`;
+        notificationBody = `${userName} cancelled ${productName} order.${reason ? ` Reason: ${reason}` : ''}`;
+        break;
+      case 'received':
+        notificationTitle = `✅ Order Received! ${shopName}`;
+        notificationBody = `${userName} received ${productName} ordered at ${shopName}. Funds are available for withdrawal!`;
+        break;
+    }
+
+    console.log('📢 Notification content:', { title: notificationTitle, body: notificationBody });
+
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'vendor',
+      redirect_url: '/vendor/orders',
+      data: {
+        vendorId: vendorId,
+        userId: auth.currentUser?.uid,
+        userName: userName,
+        productName: productName,
+        shopName: shopName,
+        action: action,
+        reason: reason,
+        type: 'order_update',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    notificationData.target_user_id = vendorDetails.firebaseUid;
+
+    const SPARE_EMAIL = 'miracleglory2099@gmail.com';
+    if (vendorDetails.businessEmail) {
+      notificationData.email = vendorDetails.businessEmail;
+      console.log('📢 Using vendor business email:', vendorDetails.businessEmail);
+    } else {
+      notificationData.email = SPARE_EMAIL;
+      console.log('📢 No vendor email found, using spare email:', SPARE_EMAIL);
+    }
+
+    console.log('📢 Sending notification with data:', JSON.stringify(notificationData, null, 2));
+
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ Notification service response:', response);
+    
+    if (response && response.success) {
+      const { error: insertError } = await supabase
+        .from('user_notifications')
+        .insert([{
+          user_id: vendorDetails.firebaseUid,
+          title: notificationTitle,
+          message: notificationBody,
+          type: 'order_update',
+          data: notificationData.data,
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (insertError) {
+        console.error('❌ Error creating user_notification:', insertError);
+      } else {
+        console.log('✅ In-app notification created successfully');
+      }
+    } else {
+      console.warn('⚠️ Notification service returned non-success:', response);
+    }
+
+  } catch (error) {
+    console.error('❌ Error sending vendor notification:', error);
+  }
+};
+// ========== END NOTIFICATION FUNCTIONS ==========
 
 // Types
 interface UserProfile {
@@ -183,6 +336,17 @@ interface Transaction {
   transaction_created_at: string;
 }
 
+// ========== INTERFACE FOR VENDOR PENDING ORDERS (EXACTLY LIKE VENDORDASH) ==========
+interface VendorOrderStats {
+  total: number;
+  pending: number;
+  accepted: number;
+  rejected: number;
+  cancelled: number;
+  received: number;
+}
+// ========== END INTERFACE ==========
+
 const UserDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -219,6 +383,17 @@ const UserDashboard: React.FC = () => {
     received: 0,
     cancelled: 0
   });
+  
+  // ========== NEW STATE FOR VENDOR PENDING ORDERS (EXACTLY LIKE VENDORDASH) ==========
+  const [vendorOrderStats, setVendorOrderStats] = useState<VendorOrderStats>({
+    total: 0,
+    pending: 0,
+    accepted: 0,
+    rejected: 0,
+    cancelled: 0,
+    received: 0
+  });
+  // ========== END NEW STATE ==========
   
   const reviewPresets = [
     {rating: 5, text: 'Excellent product! Highly recommended'},
@@ -275,6 +450,93 @@ const UserDashboard: React.FC = () => {
     return Math.round((processedItems / items.length) * 100);
   };
 
+  // ========== OPTIMIZED FUNCTION TO FETCH VENDOR PENDING ORDERS (FAST!) ==========
+  const fetchVendorPendingOrders = async (userId: string) => {
+    try {
+      console.log('🔍 Fetching vendor profiles for user:', userId);
+      
+      // First, get all vendor profiles for this user (user can have multiple shops)
+      const { data: vendorProfiles, error: vendorError } = await supabase
+        .from('vendor_profiles')
+        .select('vendor_id')
+        .eq('user_id', userId);
+
+      if (vendorError) {
+        console.error('❌ Error fetching vendor profiles:', vendorError);
+        setVendorOrderStats({
+          total: 0,
+          pending: 0,
+          accepted: 0,
+          rejected: 0,
+          cancelled: 0,
+          received: 0
+        });
+        return;
+      }
+
+      if (!vendorProfiles || vendorProfiles.length === 0) {
+        console.log('ℹ️ User is not a vendor');
+        setVendorOrderStats({
+          total: 0,
+          pending: 0,
+          accepted: 0,
+          rejected: 0,
+          cancelled: 0,
+          received: 0
+        });
+        return;
+      }
+
+      console.log('✅ Found vendor profiles:', vendorProfiles);
+
+      // Get all vendor_ids for this user
+      const vendorIds = vendorProfiles.map(v => v.vendor_id);
+      
+      console.log('📦 Vendor IDs:', vendorIds);
+
+      // Run all count queries in parallel for maximum speed
+      const [
+        { count: totalCount },
+        { count: pendingCount },
+        { count: acceptedCount },
+        { count: rejectedCount },
+        { count: cancelledCount },
+        { count: receivedCount }
+      ] = await Promise.all([
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds),
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds).eq('vendor_status', 'pending').neq('user_status', 'cancelled'),
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds).eq('vendor_status', 'accepted'),
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds).eq('vendor_status', 'rejected'),
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds).eq('user_status', 'cancelled'),
+        supabase.from('order_items').select('*', { count: 'exact', head: true }).in('vendor_id', vendorIds).eq('user_status', 'received')
+      ]);
+
+      const stats: VendorOrderStats = {
+        total: totalCount || 0,
+        pending: pendingCount || 0,
+        accepted: acceptedCount || 0,
+        rejected: rejectedCount || 0,
+        cancelled: cancelledCount || 0,
+        received: receivedCount || 0
+      };
+
+      console.log('📊 Vendor order stats (fast):', stats);
+      setVendorOrderStats(stats);
+
+    } catch (error) {
+      console.error('❌ Error in fetchVendorPendingOrders:', error);
+      setVendorOrderStats({
+        total: 0,
+        pending: 0,
+        accepted: 0,
+        rejected: 0,
+        cancelled: 0,
+        received: 0
+      });
+    }
+  };
+  // ========== END OPTIMIZED FUNCTION ==========
+
   // Fetch user data
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -285,6 +547,9 @@ const UserDashboard: React.FC = () => {
         await fetchOrderGroups(user.uid);
         await fetchTransactions(user.uid);
         await fetchTopProducts();
+        // ========== ADDED: Fetch vendor pending orders (OPTIMIZED FOR SPEED) ==========
+        await fetchVendorPendingOrders(user.uid);
+        // ========== END ADDED ==========
       } else {
         navigate('/signin');
       }
@@ -304,6 +569,32 @@ const UserDashboard: React.FC = () => {
 
       if (error) throw error;
 
+      // FIX 1: Get user's available balance from users table
+      const userAvailableBalance = Number(userData.balance) || 0;
+      const userPendingBalance = Number(userData.pending_balance) || 0;
+
+      // FIX 1: Get all vendor shops owned by this user and sum their balances
+      const { data: vendorShops, error: vendorError } = await supabase
+        .from('vendor_profiles')
+        .select('available_balance, pending_balance')
+        .eq('user_id', userId);
+
+      if (vendorError) {
+        console.error('Error fetching vendor balances:', vendorError);
+      }
+
+      let totalVendorAvailable = 0;
+      let totalVendorPending = 0;
+
+      if (vendorShops && vendorShops.length > 0) {
+        totalVendorAvailable = vendorShops.reduce((sum, shop) => sum + (Number(shop.available_balance) || 0), 0);
+        totalVendorPending = vendorShops.reduce((sum, shop) => sum + (Number(shop.pending_balance) || 0), 0);
+      }
+
+      // FIX 1: Combine user balance + all vendor shop balances
+      const combinedAvailableBalance = userAvailableBalance + totalVendorAvailable;
+      const combinedPendingBalance = userPendingBalance + totalVendorPending;
+
       const profile: UserProfile = {
         id: userData.id,
         email: userData.email || '',
@@ -313,8 +604,8 @@ const UserDashboard: React.FC = () => {
         isVerified: userData.is_active || false,
         createdAt: userData.created_at || new Date().toISOString(),
         profileImage: userData.avatar_url || '',
-        availableBalance: Number(userData.balance) || 0,
-        pendingBalance: 0,
+        availableBalance: combinedAvailableBalance,
+        pendingBalance: combinedPendingBalance,
         currency: 'NGN'
       };
 
@@ -789,9 +1080,14 @@ const UserDashboard: React.FC = () => {
     return orderGroups.flatMap(group => group.items);
   };
 
+  // FIXED: handlePingVendor with notification
   const handlePingVendor = async (orderItem: OrderItem) => {
     setProcessingAction(`ping-${orderItem.id}`);
     try {
+      // Get current user name
+      const userName = userProfile?.name || await getCurrentUserName();
+      
+      // Show success message
       setTimeout(() => {
         setProcessingAction(null);
         const successDiv = document.createElement('div');
@@ -811,6 +1107,18 @@ const UserDashboard: React.FC = () => {
         document.body.appendChild(successDiv);
         setTimeout(() => document.body.removeChild(successDiv), 2000);
       }, 500);
+
+      // ========== NOTIFICATION ADDED HERE ==========
+      // Don't await to not block UI
+      sendVendorNotification(
+        orderItem.vendor_id,
+        userName,
+        orderItem.product_title,
+        orderItem.vendor_name,
+        'ping'
+      );
+      // ========== END NOTIFICATION ==========
+      
     } catch (error) {
       console.error('Error pinging vendor:', error);
       setProcessingAction(null);
@@ -901,7 +1209,6 @@ const UserDashboard: React.FC = () => {
       if (updateError) throw updateError;
 
       // CRITICAL: Move funds from vendor's pending balance back to user's balance
-      // This happens regardless of vendor action because money belongs to user
       const { data: vendorData, error: vendorError } = await supabase
         .from('vendor_profiles')
         .select('pending_balance, vendor_id')
@@ -910,14 +1217,12 @@ const UserDashboard: React.FC = () => {
 
       if (vendorError) {
         console.error('Vendor data fetch error:', vendorError);
-        // Continue anyway, we'll still update user balance
       }
 
       if (vendorData) {
         const currentVendorPendingBalance = Number(vendorData.pending_balance) || 0;
         const newVendorPendingBalance = Math.max(0, currentVendorPendingBalance - orderItem.total_price);
 
-        // Update vendor's pending balance (deduct)
         await supabase
           .from('vendor_profiles')
           .update({ 
@@ -927,7 +1232,6 @@ const UserDashboard: React.FC = () => {
           .eq('vendor_id', orderItem.vendor_id);
       }
 
-      // Update user's available balance (add back)
       const currentUserBalance = Number(userData.balance) || 0;
       const newUserBalance = currentUserBalance + orderItem.total_price;
 
@@ -939,13 +1243,11 @@ const UserDashboard: React.FC = () => {
         })
         .eq('firebase_uid', currentUser.uid);
 
-      // Update local state
       setUserProfile(prev => prev ? {
         ...prev,
         availableBalance: newUserBalance
       } : null);
 
-      // Create transaction record
       try {
         await supabase
           .from('transactions')
@@ -970,7 +1272,19 @@ const UserDashboard: React.FC = () => {
         console.error('Transaction record error (non-critical):', transactionError);
       }
 
-      // Refresh all data
+      // ========== NOTIFICATION ADDED HERE ==========
+      const userName = userProfile?.name || await getCurrentUserName();
+      // Don't await to not block UI
+      sendVendorNotification(
+        orderItem.vendor_id,
+        userName,
+        orderItem.product_title,
+        orderItem.vendor_name,
+        'cancelled',
+        reason
+      );
+      // ========== END NOTIFICATION ==========
+
       await fetchUserData(currentUser.uid);
       await fetchUserStats(currentUser.uid);
       await fetchNotifications(currentUser.uid);
@@ -980,7 +1294,6 @@ const UserDashboard: React.FC = () => {
       setShowCancelConfirm({show: false, reason: ''});
       setProcessingAction(null);
       
-      // Show success message
       const successDiv = document.createElement('div');
       successDiv.className = 'order-action-success';
       successDiv.textContent = 'Order cancelled successfully! Funds returned to your account.';
@@ -1004,7 +1317,6 @@ const UserDashboard: React.FC = () => {
       console.error('Error cancelling order:', error);
       setProcessingAction(null);
       
-      // Show error message
       const errorDiv = document.createElement('div');
       errorDiv.className = 'order-action-error';
       errorDiv.textContent = 'Error cancelling order. Please try again.';
@@ -1033,7 +1345,6 @@ const UserDashboard: React.FC = () => {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error('User not authenticated');
 
-      // Update order item status
       const { error: updateError } = await supabase
         .from('order_items')
         .update({
@@ -1044,7 +1355,6 @@ const UserDashboard: React.FC = () => {
 
       if (updateError) throw updateError;
 
-      // CRITICAL: Move funds from vendor's pending balance to vendor's available balance
       const { data: vendorData, error: vendorError } = await supabase
         .from('vendor_profiles')
         .select('pending_balance, available_balance, vendor_id')
@@ -1060,7 +1370,6 @@ const UserDashboard: React.FC = () => {
       const newVendorPendingBalance = Math.max(0, currentVendorPendingBalance - orderItem.total_price);
       const newVendorAvailableBalance = currentVendorAvailableBalance + orderItem.total_price;
       
-      // Update vendor's balances
       const { error: vendorUpdateError } = await supabase
         .from('vendor_profiles')
         .update({
@@ -1072,7 +1381,6 @@ const UserDashboard: React.FC = () => {
 
       if (vendorUpdateError) throw vendorUpdateError;
 
-      // Create transaction record
       try {
         await supabase
           .from('transactions')
@@ -1096,7 +1404,18 @@ const UserDashboard: React.FC = () => {
         console.error('Transaction record error (non-critical):', transactionError);
       }
 
-      // Refresh all data
+      // ========== NOTIFICATION ADDED HERE ==========
+      const userName = userProfile?.name || await getCurrentUserName();
+      // Don't await to not block UI
+      sendVendorNotification(
+        orderItem.vendor_id,
+        userName,
+        orderItem.product_title,
+        orderItem.vendor_name,
+        'received'
+      );
+      // ========== END NOTIFICATION ==========
+
       await fetchUserData(currentUser.uid);
       await fetchUserStats(currentUser.uid);
       await fetchNotifications(currentUser.uid);
@@ -1107,7 +1426,6 @@ const UserDashboard: React.FC = () => {
       setShowReview({show: true, orderItem});
       setProcessingAction(null);
       
-      // Show success message
       const successDiv = document.createElement('div');
       successDiv.className = 'order-action-success';
       successDiv.textContent = 'Order received successfully! Funds transferred to vendor.';
@@ -1131,7 +1449,6 @@ const UserDashboard: React.FC = () => {
       console.error('Error receiving order:', error);
       setProcessingAction(null);
       
-      // Show error message
       const errorDiv = document.createElement('div');
       errorDiv.className = 'order-action-error';
       errorDiv.textContent = 'Error receiving order. Please try again.';
@@ -1161,7 +1478,6 @@ const UserDashboard: React.FC = () => {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error('User not authenticated');
 
-      // Insert review
       const { error: reviewError } = await supabase
         .from('reviews')
         .insert({
@@ -1177,7 +1493,6 @@ const UserDashboard: React.FC = () => {
 
       if (reviewError) throw reviewError;
 
-      // Refresh data
       await fetchUserData(currentUser.uid);
       await fetchUserStats(currentUser.uid);
 
@@ -1185,7 +1500,6 @@ const UserDashboard: React.FC = () => {
       setReviewData({rating: 5, review: ''});
       setProcessingAction(null);
       
-      // Show success message
       const successDiv = document.createElement('div');
       successDiv.className = 'order-action-success';
       successDiv.textContent = 'Review submitted successfully!';
@@ -1258,30 +1572,30 @@ const UserDashboard: React.FC = () => {
               src={userProfile.profileImage} 
               alt="User" 
               className="userdashboard-avatar"
-              onClick={() => navigate('#profile')}
+              onClick={() => navigate('/user/profile')}
             />
           ) : (
             <div 
               className="userdashboard-avatar-placeholder"
-              onClick={() => navigate('#profile')}
+              onClick={() => navigate('/user/profile')}
             >
               {userProfile?.name?.charAt(0) || 'U'}
             </div>
           )}
           <div className="userdashboard-welcome">
             <span className="userdashboard-welcome-text">Welcome back,</span>
-            <span className="userdashboard-user-name">{userProfile ? userProfile.name.split(' ')[0] : 'User'}</span>
+            <span className="userdashboard-user-name">{userProfile ? userProfile.name.split(' ')[0] : 'User Login'}</span>
           </div>
         </div>
         
         <div className="userdashboard-header-right">
           <button 
-            className="userdashboard-notification-btn"
-            onClick={handleNotificationClick}
+            className="userdashboard-notification-btn" onClick={() => window.location.href = '/notifications'}
+            
           >
             <Bell size={18} />
             {notifications.length > 0 && (
-              <span className="userdashboard-notification-badge">{notifications.length}</span>
+              <span className="userdashboard-notification-badge" >{notifications.length}</span>
             )}
           </button>
           
@@ -1295,6 +1609,10 @@ const UserDashboard: React.FC = () => {
                 await fetchNotifications(auth.currentUser.uid);
                 await fetchOrderGroups(auth.currentUser.uid);
                 await fetchTransactions(auth.currentUser.uid);
+                await fetchTopProducts();
+                // ========== ADDED: Fetch vendor pending orders on refresh (OPTIMIZED FOR SPEED) ==========
+                await fetchVendorPendingOrders(auth.currentUser.uid);
+                // ========== END ADDED ==========
               }
               setLoading(false);
             }}
@@ -1315,17 +1633,21 @@ const UserDashboard: React.FC = () => {
             </div>
             
             <div className="userdashboard-balance-actions">
+              {/* FIX 2: Added "Deposit" text to wallet icon and redirect to /money */}
               <button 
                 className="userdashboard-fund-btn"
-                onClick={() => navigate('#fund')}
+                onClick={() => navigate('/money')}
               >
                 <Wallet size={14} />
+                <span style={{ marginLeft: '4px', fontSize: '10px' }}>Deposit</span>
               </button>
+              {/* FIX 2: Added "Withdraw" text to transfer icon and redirect to /money */}
               <button 
                 className="userdashboard-transfer-btn"
-                onClick={() => navigate('#transfer')}
+                onClick={() => navigate('/money')}
               >
                 <Send size={14} />
+                <span style={{ marginLeft: '4px', fontSize: '10px' }}>Withdraw</span>
               </button>
               <button 
                 className="userdashboard-eye-btn"
@@ -2098,30 +2420,7 @@ const UserDashboard: React.FC = () => {
       )}
 
       {/* Bottom Navigation */}
-      <nav className="bottom-navigation">
-        <button className="nav-button" onClick={() => navigate('/market')}>
-          <ShoppingBag className="nav-icon" size={16} />
-          <span className="nav-label">Market</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/cart')}>
-          <ShoppingCart className="nav-icon" size={16} />
-          <span className="nav-label">Buy</span>
-          {cartCount > 0 && <span className="userdashboard-nav-badge">{cartCount}</span>}
-        </button>
-        <button className="nav-button" onClick={() => navigate('/vendor/dashboard')}>
-          <Store className="nav-icon" size={16} />
-          <span className="nav-label">Sell</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/favorites')}>
-          <Heart className="nav-icon" size={16} />
-          <span className="nav-label">Favorites</span>
-          {favoritesCount > 0 && <span className="userdashboard-nav-badge">{favoritesCount}</span>}
-        </button>
-        <button className="nav-button" onClick={() => navigate('/chats')}>
-          <MessageSquare className="nav-icon" size={16} />
-          <span className="nav-label">Chats</span>
-        </button>
-      </nav>
+      
     </div>
   );
 };

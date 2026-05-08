@@ -3,6 +3,7 @@ import { auth } from '../../lib/firebase';
 import { supabase } from '../../lib/supabaseClient';
 import { User } from 'firebase/auth';
 import { Shield, AlertCircle, CheckCircle, CreditCard, X, Receipt, Package, Home, BarChart, Printer } from 'lucide-react';
+import { notificationService } from '../../services/notificationService'; // Add this import
 import './OrderComponent.css';
 
 // Types
@@ -55,6 +56,193 @@ interface OrderComponentProps {
   onOrderSuccess: (orderId: string) => void;
   onClose: () => void;
 }
+
+// Helper function to get current user's name
+const getCurrentUserName = async (): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) return 'A user';
+
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('name')
+      .eq('firebase_uid', user.uid)
+      .maybeSingle();
+    
+    return data?.name || user.displayName || 'A user';
+  } catch {
+    return user.displayName || 'A user';
+  }
+};
+
+// Helper function to get vendor details from vendor_id
+const getVendorDetails = async (vendorId: string): Promise<{ firebaseUid: string | null; businessEmail: string | null; shopName: string | null }> => {
+  try {
+    console.log('🔍 OrderComponent - Getting vendor details for vendor:', vendorId);
+    
+    // Get vendor profile using vendor_id
+    const { data: vendorProfile, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('user_id, business_email, shop_name')
+      .eq('vendor_id', vendorId)
+      .maybeSingle();
+
+    if (vendorError) {
+      console.error('❌ OrderComponent - Error fetching vendor profile:', vendorError);
+    }
+
+    if (vendorProfile) {
+      console.log('✅ OrderComponent - Found vendor profile:', vendorProfile);
+      return {
+        firebaseUid: vendorProfile.user_id,
+        businessEmail: vendorProfile.business_email,
+        shopName: vendorProfile.shop_name || 'Shop'
+      };
+    }
+
+    console.warn('⚠️ OrderComponent - No vendor profile found for vendor_id:', vendorId);
+    return { firebaseUid: null, businessEmail: null, shopName: null };
+
+  } catch (error) {
+    console.error('❌ OrderComponent - Error in getVendorDetails:', error);
+    return { firebaseUid: null, businessEmail: null, shopName: null };
+  }
+};
+
+// Helper function to send notification to vendor
+const sendVendorNotification = async (
+  vendorId: string, 
+  userName: string, 
+  productName: string, 
+  shopName: string,
+  orderNumber: string
+) => {
+  try {
+    console.log('📢 OrderComponent - Starting to send notification to vendor:', vendorId);
+    
+    // Get vendor details
+    const vendorDetails = await getVendorDetails(vendorId);
+    
+    if (!vendorDetails.firebaseUid) {
+      console.warn('⚠️ OrderComponent - Could not find vendor Firebase UID for:', vendorId);
+      return;
+    }
+
+    console.log('📢 OrderComponent - Vendor details for notification:', vendorDetails);
+
+    // Format the message
+    const notificationBody = `${userName} ordered ${productName} at ${shopName}`;
+    const notificationTitle = `🛍️ New Order!! ${shopName}`;
+
+    console.log('📢 OrderComponent - Notification content:', { title: notificationTitle, body: notificationBody });
+
+    // Prepare notification data
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'vendor',
+      redirect_url: '/vendor/orders',
+      data: {
+        vendorId: vendorId,
+        userId: auth.currentUser?.uid,
+        productName: productName,
+        shopName: shopName,
+        orderNumber: orderNumber,
+        type: 'order_activity',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    // Add target user (Firebase UID)
+    notificationData.target_user_id = vendorDetails.firebaseUid;
+
+    // Add email with fallback
+    const SPARE_EMAIL = 'miracleglory2099@gmail.com';
+    if (vendorDetails.businessEmail) {
+      notificationData.email = vendorDetails.businessEmail;
+      console.log('📢 OrderComponent - Using vendor business email:', vendorDetails.businessEmail);
+    } else {
+      notificationData.email = SPARE_EMAIL;
+      console.log('📢 OrderComponent - No vendor email found, using spare email:', SPARE_EMAIL);
+    }
+
+    console.log('📢 OrderComponent - Sending notification with data:', JSON.stringify(notificationData, null, 2));
+
+    // Send notification through the service
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ OrderComponent - Notification service response:', response);
+    
+    // Create in-app notification
+    if (response && response.success) {
+      const { error: insertError } = await supabase
+        .from('user_notifications')
+        .insert([{
+          user_id: vendorDetails.firebaseUid,
+          title: notificationTitle,
+          message: notificationBody,
+          type: 'order',
+          data: notificationData.data,
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (insertError) {
+        console.error('❌ OrderComponent - Error creating user_notification:', insertError);
+      } else {
+        console.log('✅ OrderComponent - In-app notification created successfully');
+      }
+    } else {
+      console.warn('⚠️ OrderComponent - Notification service returned non-success:', response);
+    }
+
+  } catch (error) {
+    console.error('❌ OrderComponent - Error sending vendor notification:', error);
+  }
+};
+
+// Helper function to send notifications to all vendors
+const sendNotificationsToAllVendors = async (
+  cartItems: CartItem[],
+  userName: string,
+  orderNumber: string
+) => {
+  try {
+    console.log('📢 OrderComponent - Sending notifications to all vendors');
+    
+    // Group items by vendor to avoid duplicate notifications for same vendor
+    const vendorGroups = cartItems.reduce((acc, item) => {
+      if (!acc[item.vendor_id]) {
+        acc[item.vendor_id] = {
+          vendorId: item.vendor_id,
+          shopName: item.product.vendor_name,
+          products: []
+        };
+      }
+      acc[item.vendor_id].products.push(item.product.title);
+      return acc;
+    }, {} as Record<string, any>);
+
+    // Send notification to each vendor (one per vendor)
+    for (const vendorId in vendorGroups) {
+      const vendor = vendorGroups[vendorId];
+      // Join product names if multiple products from same vendor
+      const productNames = vendor.products.join(', ');
+      
+      await sendVendorNotification(
+        vendorId,
+        userName,
+        productNames,
+        vendor.shopName,
+        orderNumber
+      );
+    }
+
+    console.log('✅ OrderComponent - All vendor notifications sent');
+  } catch (error) {
+    console.error('❌ OrderComponent - Error sending notifications to vendors:', error);
+  }
+};
 
 const OrderComponent: React.FC<OrderComponentProps> = ({
   cartItems,
@@ -609,6 +797,10 @@ const OrderComponent: React.FC<OrderComponentProps> = ({
       setStep('success');
       setProcessingOrder('');
       setProcessingStage(0);
+
+      // Send notifications to all vendors (don't await to not block UI)
+      const userName = userProfile?.name || 'A user';
+      sendNotificationsToAllVendors(cartItems, userName, orderNumber);
 
     } catch (error: any) {
       console.error('Error processing order:', error);

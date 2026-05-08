@@ -20,9 +20,12 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-firebase-hooks": "^5.1.1",
+    "react-infinite-scroll-component": "^6.1.1",
     "react-onesignal": "^3.4.6",
     "react-router-dom": "^7.9.5",
     "react-scripts": "5.0.1",
+    "sendbird": "^3.1.33",
+    "sendbird-calls": "^1.10.21",
     "typescript": "^4.9.5",
     "web-vitals": "^2.1.4"
   },

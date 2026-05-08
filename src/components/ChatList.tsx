@@ -4,6 +4,8 @@ import { auth, db } from '../lib/firebase';
 import { doc, getDoc } from "firebase/firestore";
 import { supabase } from '../lib/supabaseClient';
 import { formatDistanceToNowStrict, parseISO } from "date-fns";
+import { PhoneCall, History } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { 
   ArrowLeft, 
   Search, 
@@ -80,6 +82,7 @@ export default function ChatList() {
   const personaMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const autoSearchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const navigate = useNavigate();
 
   console.log("🔵 ChatList Component Mounted");
   console.log("🔵 Current State:", {
@@ -505,7 +508,7 @@ export default function ChatList() {
       
     } catch (err: any) {
       console.error('❌ fetchRoomsForPersona error:', err);
-      setError('Failed to load rooms: ' + (err.message || 'Unknown error'));
+      setError('Failed to load chatrooms: Please try again later');
       setRooms([]); // Clear rooms on error
     } finally {
       console.log("🟡 Setting loading to false");
@@ -532,6 +535,36 @@ export default function ChatList() {
       }
     };
   }, [searchId]);
+
+
+  /////////////////////////////
+// Mark chat notifications as read when chat list loads
+useEffect(() => {
+  const markChatNotificationsAsRead = async () => {
+    if (!user || !initialLoadComplete) return;
+    
+    try {
+      console.log("🟡 Marking chat notifications as read for user:", user.uid);
+      
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('receiver_id', user.uid)
+        .eq('notification_type', 'chat');
+      
+      if (error) {
+        console.error('❌ Error marking chat notifications as read:', error);
+      } else {
+        console.log('✅ Chat notifications marked as read successfully');
+      }
+    } catch (error) {
+      console.error('❌ Exception marking notifications as read:', error);
+    }
+  };
+  
+  markChatNotificationsAsRead();
+}, [user, initialLoadComplete]);
+///////////////////////////////////////
 
   // Search user/vendor by ID in Supabase
   const searchById = async () => {
@@ -1217,6 +1250,8 @@ export default function ChatList() {
 
         <div className="chatlist-header-right">
           <div className="chatlist-header-actions">
+
+            
             <button 
               className="chatlist-action-btn"
               onClick={() => {
@@ -1227,6 +1262,14 @@ export default function ChatList() {
             >
               <ArrowLeft size={16} />
             </button>
+
+            <button 
+  className="chatlist-action-btn"
+  onClick={() => navigate('/call-logs')}
+  title="Call History"
+>
+  <PhoneCall size={16} />
+</button>
             
             <div className="chatlist-settings-wrapper" ref={settingsMenuRef}>
               <button 
@@ -1617,43 +1660,7 @@ export default function ChatList() {
         )}
       </div>
 
-      {/* Bottom Navigation */}
-      <nav className="chatlist-bottom-nav">
-        <button onClick={() => {
-          console.log("🟡 Home button clicked");
-          window.location.href = '/';
-        }}>
-          <Home size={18} />
-        </button>
-        
-        <button onClick={() => {
-          console.log("🟡 Market button clicked");
-          window.location.href = '/market';
-        }}>
-          <ShoppingBag size={18} />
-        </button>
-        
-        <button onClick={() => {
-          console.log("🔵 Sell button clicked");
-          window.location.href = '/vendor/dashboard';
-        }}>
-          <Store size={18} />
-        </button>
-        
-        <button className="active" onClick={() => {
-          console.log("🟡 Chats button clicked");
-          window.location.href = '/chats';
-        }}>
-          <MessageCircle size={18} />
-        </button>
-        
-        <button onClick={() => {
-          console.log("🟡 Favorites button clicked");
-          window.location.href = '/favorites';
-        }}>
-          <Heart size={18} />
-        </button>
-      </nav>
+     
     </div>
   );
 }

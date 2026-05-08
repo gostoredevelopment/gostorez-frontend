@@ -6,6 +6,7 @@ import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firesto
 import { supabase } from '../../lib/supabaseClient';
 import imageCompression from 'browser-image-compression';
 import logo from '../../assets/images/logo.png';
+import { notificationService } from '../../services/notificationService';
 
 interface Campus {
   id: number;
@@ -54,6 +55,132 @@ interface UserProfile {
   profileImage?: string;
 }
 
+// ========== NOTIFICATION FUNCTION ==========
+const sendNewProductNotification = async (
+  product: any,
+  shopName: string,
+  shopId: string
+) => {
+  try {
+    console.log('📢 Sending new product notification to all users');
+    
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('firebase_uid, email, name')
+      .not('firebase_uid', 'is', null);
+
+    if (usersError) {
+      console.error('❌ Error fetching users:', usersError);
+      return;
+    }
+
+    if (!users || users.length === 0) {
+      console.log('No users found to notify');
+      return;
+    }
+
+    console.log(`📢 Found ${users.length} users to notify`);
+
+    const firebaseUids = users
+      .map(user => user.firebase_uid)
+      .filter(uid => uid && uid.trim() !== '');
+
+    const emails = users
+      .map(user => user.email)
+      .filter(email => email && email.trim() !== '');
+
+    const formattedPrice = new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(product.price);
+
+    const notificationTitle = `🆕 New Product Alert: ${product.title}`;
+    const notificationBody = `${shopName} just launched "${product.title}" at ${formattedPrice}. Check it out now!`;
+
+    console.log('📢 Notification content:', { 
+      title: notificationTitle, 
+      body: notificationBody,
+      usersCount: firebaseUids.length,
+      emailsCount: emails.length 
+    });
+
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'vendor',
+      redirect_url: `/product/${product.id}`,
+      data: {
+        productId: product.id,
+        productTitle: product.title,
+        productPrice: product.price,
+        shopId: shopId,
+        shopName: shopName,
+        type: 'new_product_launch',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    if (firebaseUids.length > 0) {
+      notificationData.target_user_ids = firebaseUids;
+    }
+
+    if (emails.length > 0) {
+      notificationData.email_list = emails;
+    }
+
+    console.log('📢 Sending notification...');
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ Notification service response:', response);
+    
+    if (response && response.success) {
+      const inAppNotifications = users.map(user => ({
+        user_id: user.firebase_uid,
+        title: notificationTitle,
+        message: notificationBody,
+        type: 'new_product',
+        data: {
+          productId: product.id,
+          productTitle: product.title,
+          productPrice: product.price,
+          shopId: shopId,
+          shopName: shopName,
+          redirect_url: `/product/${product.id}`
+        },
+        is_read: false,
+        created_at: new Date().toISOString()
+      }));
+
+      const batchSize = 50;
+      for (let i = 0; i < inAppNotifications.length; i += batchSize) {
+        const batch = inAppNotifications.slice(i, i + batchSize);
+        const { error: insertError } = await supabase
+          .from('user_notifications')
+          .insert(batch);
+
+        if (insertError) {
+          console.error(`❌ Error creating notifications batch ${i}:`, insertError);
+        }
+      }
+
+      console.log('✅ All in-app notifications created successfully');
+    }
+
+    console.log('📊 Notification Summary:', {
+      totalUsers: users.length,
+      pushTargets: firebaseUids.length,
+      emailTargets: emails.length,
+      productId: product.id
+    });
+
+  } catch (error) {
+    console.error('❌ Error sending new product notification:', error);
+  }
+};
+// ========== END NOTIFICATION FUNCTION ==========
+
 const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const [formData, setFormData] = useState({
     title: '',
@@ -70,6 +197,7 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [productImages, setProductImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [imageDataUrls, setImageDataUrls] = useState<string[]>([]); // Store the actual image data
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -197,7 +325,6 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
         };
         setUserProfile(profile);
       } else {
-        // Fallback to auth user data
         const user = auth.currentUser;
         if (user) {
           const fallbackProfile: UserProfile = {
@@ -272,10 +399,7 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 
   const fetchRecentData = async () => {
     if (!selectedShop || !currentUser) return;
-
     try {
-      // For now, we'll set empty recent data
-      // In production, you would fetch actual recent data from your database
       setRecentCategories([]);
       setRecentCampuses([]);
     } catch (error) {
@@ -340,10 +464,8 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
     const isAlreadySelected = selectedCampuses.find(c => c.id === campus.id);
     
     if (isAlreadySelected) {
-      // Remove from selected
       setSelectedCampuses(prev => prev.filter(c => c.id !== campus.id));
     } else {
-      // Add to selected
       setSelectedCampuses(prev => [...prev, campus]);
     }
   };
@@ -351,7 +473,7 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const handleSelectAllLocations = () => {
     if (window.confirm('Are you able to deliver to anywhere in Nigeria?')) {
       setSelectAllLocations(true);
-      setSelectedCampuses([]); // Clear individual selections when "ALL" is selected
+      setSelectedCampuses([]);
       setShowLocationDropdown(false);
     }
   };
@@ -386,6 +508,16 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
     return await imageCompression(file, options);
   };
 
+  // Convert file to data URL (base64) - this will be stored directly in the database
+  const fileToDataURL = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     
@@ -398,12 +530,14 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
       try {
         const compressedFile = await compressImage(file);
         const previewUrl = URL.createObjectURL(compressedFile);
+        const dataUrl = await fileToDataURL(compressedFile);
         
         setProductImages(prev => [...prev, compressedFile]);
         setImagePreviews(prev => [...prev, previewUrl]);
+        setImageDataUrls(prev => [...prev, dataUrl]); // Store the actual image data
       } catch (error) {
-        console.error('Error compressing image:', error);
-        setError('Failed to compress image. Please try another image.');
+        console.error('Error processing image:', error);
+        setError('Failed to process image. Please try another image.');
       }
     }
   };
@@ -412,297 +546,271 @@ const AddProductForm: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
     URL.revokeObjectURL(imagePreviews[index]);
     setProductImages(prev => prev.filter((_, i) => i !== index));
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    setImageDataUrls(prev => prev.filter((_, i) => i !== index));
   };
 
-  const uploadProductImages = async (userId: string): Promise<string[]> => {
-    const imageUrls: string[] = [];
-    
-    for (let i = 0; i < productImages.length; i++) {
-      const file = productImages[i];
-      const fileExt = file.name.split('.').pop() || 'jpg';
-      const fileName = `${userId}/products/${Date.now()}-${i}.${fileExt}`;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
 
-      const { data, error } = await supabase.storage
-        .from('product-images')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
+    try {
+      // Authentication and shop validation
+      if (!currentUser) throw new Error('You must be logged in to add products.');
+      if (!selectedShop) throw new Error('Please select a shop to add products to.');
 
-      if (error) {
-        console.error('Error uploading product image:', error);
-        throw new Error(`Failed to upload image: ${error.message}`);
+      // Form validation
+      if (!formData.title.trim()) throw new Error('Product title is required');
+      if (!formData.price || parseFloat(formData.price) <= 0) throw new Error('Valid price is required');
+      if (!selectedCategory) throw new Error('Please select a category');
+      if (productImages.length === 0) throw new Error('At least one product image is required');
+      if (selectedCampuses.length === 0 && !selectAllLocations) throw new Error('Please add at least one delivery location');
+
+      // Check vendor profile
+      const shopId = selectedShop.id;
+      console.log('Checking vendor profile for user_id:', currentUser.uid, 'and vendor_id:', shopId);
+      
+      const { data: existingVendorProfile, error: vendorProfileCheckError } = await supabase
+        .from('vendor_profiles')
+        .select('id, vendor_id, shop_name, total_products')
+        .eq('user_id', currentUser.uid)
+        .eq('vendor_id', shopId)
+        .maybeSingle();
+
+      let vendorProfileId: string | undefined;
+
+      if (!existingVendorProfile) {
+        console.log('Creating new vendor profile for shop:', selectedShop.shopName);
+        const { data: newVendorProfile, error: createVendorProfileError } = await supabase
+          .from('vendor_profiles')
+          .insert([{
+            user_id: currentUser.uid,
+            vendor_id: shopId,
+            shop_name: selectedShop.shopName,
+            profile_image: selectedShop.profileImage || '',
+            cover_image: selectedShop.coverImage || '', 
+            bio: selectedShop.bio || '',
+            is_active: true,
+            onboarding_completed: true,
+            total_products: 0
+          }])
+          .select()
+          .single();
+
+        if (createVendorProfileError) {
+          console.error('Vendor profile creation error:', createVendorProfileError);
+        } else if (newVendorProfile) {
+          vendorProfileId = newVendorProfile.id;
+          console.log('Created new vendor profile with vendor_id:', newVendorProfile.vendor_id);
+        }
+      } else {
+        vendorProfileId = existingVendorProfile.id;
+        console.log('Found existing vendor profile with vendor_id:', existingVendorProfile.vendor_id);
       }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(fileName);
+      // Generate unique slug
+      const baseSlug = formData.title
+        .toLowerCase()
+        .replace(/[^a-z0-9 -]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .substring(0, 90);
 
-      imageUrls.push(publicUrl);
-    }
-    
-    return imageUrls;
-  };
+      let finalSlug = baseSlug;
+      let slugCounter = 1;
+      
+      while (slugCounter < 10) {
+        const { data: existingSlug } = await supabase
+          .from('products')
+          .select('slug')
+          .eq('slug', finalSlug)
+          .maybeSingle();
 
-////////////////////////////////
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError('');
-  setSuccess('');
-  setLoading(true);
+        if (!existingSlug) break;
+        
+        finalSlug = `${baseSlug}-${slugCounter}`;
+        slugCounter++;
+      }
 
-  try {
-    // Authentication and shop validation
-    if (!currentUser) throw new Error('You must be logged in to add products.');
-    if (!selectedShop) throw new Error('Please select a shop to add products to.');
+      if (slugCounter >= 10) {
+        finalSlug = `${baseSlug}-${Date.now()}`;
+      }
 
-    // Form validation
-    if (!formData.title.trim()) throw new Error('Product title is required');
-    if (!formData.price || parseFloat(formData.price) <= 0) throw new Error('Valid price is required');
-    if (!selectedCategory) throw new Error('Please select a category');
-    if (productImages.length === 0) throw new Error('At least one product image is required');
-    if (selectedCampuses.length === 0 && !selectAllLocations) throw new Error('Please add at least one delivery location');
+      console.log('Using unique slug:', finalSlug);
 
-    // Step 1: Check if vendor profile exists with BOTH user_id AND vendor_id
-    const shopId = selectedShop.id;
-    console.log('Checking vendor profile for user_id:', currentUser.uid, 'and vendor_id:', shopId);
-    
-    const { data: existingVendorProfile, error: vendorProfileCheckError } = await supabase
-      .from('vendor_profiles')
-      .select('id, vendor_id, shop_name, total_products')
-      .eq('user_id', currentUser.uid)
-      .eq('vendor_id', shopId)
-      .single();
+      // Insert product - images are stored as data URLs directly in the database
+      console.log('Inserting product into database...');
+      const productData = {
+        vendor_id: shopId,
+        user_id: currentUser.uid,
+        title: formData.title.trim(),
+        slug: finalSlug,
+        description: formData.description.trim(),
+        price: parseFloat(formData.price),
+        currency: 'NGN',
+        images: imageDataUrls, // Store the image data URLs directly in the database
+        inventory: parseInt(formData.inventory) || 1,
+        is_active: true,
+        vendor_name: selectedShop.shopName,
+        condition: 'new',
+        category: categories.find(c => c.id === selectedCategory)?.name || '',
+        cart_count: 0,
+        views_count: 0,
+        likes_count: 0,
+        sales_count: 0,
+        is_promoted: false
+      };
 
-    let vendorProfileId: string | undefined;
+      console.log('Product data to insert:', productData);
 
-    if (vendorProfileCheckError && vendorProfileCheckError.code === 'PGRST116') {
-      // Create new vendor profile using Firebase shop data
-      console.log('Creating new vendor profile for shop:', selectedShop.shopName);
-      const { data: newVendorProfile, error: createVendorProfileError } = await supabase
-        .from('vendor_profiles')
-        .insert([{
-          user_id: currentUser.uid, // Firebase user ID (owner)
-          vendor_id: shopId, // Firebase shop ID as unique identifier
-          shop_name: selectedShop.shopName,
-          profile_image: selectedShop.profileImage || '',
-          cover_image: selectedShop.coverImage || '', 
-          bio: selectedShop.bio || '',
-          is_active: true,
-          onboarding_completed: true,
-          total_products: 0
-        }])
+      const { data: product, error: productError } = await supabase
+        .from('products')
+        .insert([productData])
         .select()
         .single();
 
-      if (createVendorProfileError) {
-        console.error('Vendor profile creation error:', createVendorProfileError);
-        // Continue with product upload even if vendor creation fails
-        console.log('Continuing with product upload despite vendor profile error');
-      } else if (newVendorProfile) {
-        vendorProfileId = newVendorProfile.id;
-        console.log('Created new vendor profile with vendor_id:', newVendorProfile.vendor_id);
+      if (productError) {
+        console.error('Product insertion error:', productError);
+        throw new Error(`Failed to create product: ${productError.message}`);
       }
-    }
-    
-    else if (vendorProfileCheckError) {
-      console.error('Vendor profile lookup error:', vendorProfileCheckError);
-      // Continue with product upload despite lookup error
-      console.log('Continuing with product upload despite vendor lookup error');
-    } else {
-      vendorProfileId = existingVendorProfile.id;
-      console.log('Found existing vendor profile with vendor_id:', existingVendorProfile.vendor_id);
-    }
 
-    // Step 2: Upload product images to Supabase Storage
-    console.log('Uploading product images...');
-    const imageUrls = await uploadProductImages(currentUser.uid);
-    console.log('Product images uploaded:', imageUrls);
+      if (!product) throw new Error('Failed to create product: No data returned');
 
-    // Step 3: Generate UNIQUE URL-friendly slug from title
-    const baseSlug = formData.title
-      .toLowerCase()
-      .replace(/[^a-z0-9 -]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .substring(0, 90);
+      console.log('Product created successfully with ID:', product.id);
+      console.log('Product images stored:', product.images);
 
-    // Check if slug exists and generate unique one
-    let finalSlug = baseSlug;
-    let slugCounter = 1;
-    
-    while (slugCounter < 10) {
-      const { data: existingSlug } = await supabase
-        .from('products')
-        .select('slug')
-        .eq('slug', finalSlug)
-        .single();
+      // Add product to category
+      console.log('Adding product to category:', selectedCategory);
+      const { error: categoryError } = await supabase
+        .from('product_categories')
+        .insert([{
+          product_id: product.id,
+          category_id: selectedCategory
+        }]);
 
-      if (!existingSlug) break;
-      
-      finalSlug = `${baseSlug}-${slugCounter}`;
-      slugCounter++;
-    }
+      if (categoryError) {
+        console.error('Category assignment error:', categoryError);
+        throw new Error('Failed to assign product category');
+      }
 
-    if (slugCounter >= 10) {
-      finalSlug = `${baseSlug}-${Date.now()}`;
-    }
-
-    console.log('Using unique slug:', finalSlug);
-
-    // Step 4: Insert product into products table
-    console.log('Inserting product into database...');
-    const productData = {
-      vendor_id: shopId,
-      user_id: currentUser.uid,
-      title: formData.title.trim(),
-      slug: finalSlug,
-      description: formData.description.trim(),
-      price: parseFloat(formData.price),
-      currency: 'NGN',
-      images: imageUrls,
-      inventory: parseInt(formData.inventory) || 1,
-      is_active: true,
-      vendor_name: selectedShop.shopName,
-      condition: 'new',
-      category: categories.find(c => c.id === selectedCategory)?.name || ''
-    };
-
-    console.log('Product data to insert:', productData);
-
-    const { data: product, error: productError } = await supabase
-      .from('products')
-      .insert([productData])
-      .select()
-      .single();
-
-    if (productError) {
-      console.error('Product insertion error:', productError);
-      throw new Error(`Failed to create product: ${productError.message}`);
-    }
-
-    if (!product) throw new Error('Failed to create product: No data returned');
-
-    console.log('Product created successfully with ID:', product.id);
-
-    // Step 5: Add product to category
-    console.log('Adding product to category:', selectedCategory);
-    const { error: categoryError } = await supabase
-      .from('product_categories')
-      .insert([{
+      // Add delivery locations
+      console.log('Adding delivery locations...');
+      const deliveryLocations = selectedCampuses.map(campus => ({
         product_id: product.id,
-        category_id: selectedCategory
-      }]);
+        campus_id: campus.id
+      }));
 
-    if (categoryError) {
-      console.error('Category assignment error:', categoryError);
-      throw new Error('Failed to assign product category');
-    }
+      if (deliveryLocations.length > 0) {
+        const { error: locationError } = await supabase
+          .from('product_delivery_locations')
+          .insert(deliveryLocations);
 
-    // Step 6: Add delivery locations
-    console.log('Adding delivery locations...');
-    const deliveryLocations = selectedCampuses.map(campus => ({
-      product_id: product.id,
-      campus_id: campus.id
-    }));
-
-    if (deliveryLocations.length > 0) {
-      const { error: locationError } = await supabase
-        .from('product_delivery_locations')
-        .insert(deliveryLocations);
-
-      if (locationError) {
-        console.error('Delivery locations error:', locationError);
-        throw new Error('Failed to add delivery locations');
+        if (locationError) {
+          console.error('Delivery locations error:', locationError);
+          throw new Error('Failed to add delivery locations');
+        }
+        console.log(`Added ${deliveryLocations.length} delivery locations`);
       }
-      console.log(`Added ${deliveryLocations.length} delivery locations`);
+
+      // Update vendor profile product count
+      if (vendorProfileId) {
+        const { error: updateVendorError } = await supabase
+          .from('vendor_profiles')
+          .update({ 
+            total_products: (existingVendorProfile?.total_products || 0) + 1,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', vendorProfileId);
+
+        if (updateVendorError) console.warn('Could not update vendor product count:', updateVendorError);
+      }
+
+      // Update vendor preferences
+      console.log('Updating vendor preferences...');
+
+      if (vendorProfileId) {
+        const { error: vendorCategoryError } = await supabase
+          .from('vendor_categories')
+          .upsert([{
+            vendor_id: vendorProfileId,
+            category_id: selectedCategory
+          }], {
+            onConflict: 'vendor_id,category_id',
+            ignoreDuplicates: true
+          });
+
+        if (vendorCategoryError) console.warn('Could not update vendor categories:', vendorCategoryError);
+
+        const vendorDeliveryLocations = selectedCampuses.map(campus => ({
+          vendor_id: vendorProfileId,
+          campus_id: campus.id,
+          delivery_fee: 0,
+          delivery_radius_m: null
+        }));
+
+        if (vendorDeliveryLocations.length > 0) {
+          const { error: vendorLocationError } = await supabase
+            .from('vendor_delivery_locations')
+            .upsert(vendorDeliveryLocations, {
+              onConflict: 'vendor_id,campus_id',
+              ignoreDuplicates: true
+            });
+
+          if (vendorLocationError) console.warn('Could not update vendor delivery locations:', vendorLocationError);
+        }
+      }
+
+      console.log('Vendor preferences updated successfully');
+
+      // ========== SEND NOTIFICATIONS ==========
+      sendNewProductNotification(
+        product,
+        selectedShop.shopName,
+        selectedShop.id
+      );
+      // ========== END NOTIFICATIONS ==========
+
+      // Success - update UI and reset form
+      setSuccess('🎉 Product created successfully! Notifications sent to all users.');
+      
+      // Reset form state
+      setFormData({
+        title: '',
+        description: '',
+        price: '',
+        inventory: '1'
+      });
+      setSelectedCategory(null);
+      setSelectedCampuses([]);
+      setSelectAllLocations(false);
+      setProductImages([]);
+      setImageDataUrls([]);
+      
+      // Clean up image preview URLs
+      imagePreviews.forEach(preview => URL.revokeObjectURL(preview));
+      setImagePreviews([]);
+      
+      setSearchQuery('');
+      setShowCategoryDropdown(false);
+      setShowLocationDropdown(false);
+
+      console.log('Product creation completed successfully');
+
+      // Auto close after 3 seconds if onClose exists
+      if (onClose) {
+        setTimeout(() => {
+          onClose();
+        }, 3000);
+      }
+
+    } catch (error: any) {
+      console.error('Product creation error:', error);
+      setError(error.message);
+    } finally {
+      setLoading(false);
     }
-
-    // Step 7: Update vendor profile product count if vendor exists
-    if (vendorProfileId) {
-      const { error: updateVendorError } = await supabase
-        .from('vendor_profiles')
-        .update({ 
-          total_products: (existingVendorProfile?.total_products || 0) + 1,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', vendorProfileId);
-
-      if (updateVendorError) console.warn('Could not update vendor product count:', updateVendorError);
-    }
-
-    /////////////////////////////////////////
-    // Step 8: Update vendor preferences based on product data
-console.log('Updating vendor preferences...');
-
-// Add to vendor_categories if not exists
-const { error: vendorCategoryError } = await supabase
-  .from('vendor_categories')
-  .upsert([{
-    vendor_id: vendorProfileId, // Use the vendor_profile ID (bigint)
-    category_id: selectedCategory
-  }], {
-    onConflict: 'vendor_id,category_id',
-    ignoreDuplicates: true
-  });
-
-if (vendorCategoryError) console.warn('Could not update vendor categories:', vendorCategoryError);
-
-// Add to vendor_delivery_locations if not exists
-const vendorDeliveryLocations = selectedCampuses.map(campus => ({
-  vendor_id: vendorProfileId, // Use the vendor_profile ID (bigint)
-  campus_id: campus.id,
-  delivery_fee: 0, // Default value
-  delivery_radius_m: null // Default value
-}));
-
-if (vendorDeliveryLocations.length > 0) {
-  const { error: vendorLocationError } = await supabase
-    .from('vendor_delivery_locations')
-    .upsert(vendorDeliveryLocations, {
-      onConflict: 'vendor_id,campus_id',
-      ignoreDuplicates: true
-    });
-
-  if (vendorLocationError) console.warn('Could not update vendor delivery locations:', vendorLocationError);
-}
-
-console.log('Vendor preferences updated successfully');
-/////////////////////////////////////
-
-    // Success - update UI and reset form
-    setSuccess('🎉 Product created successfully!');
-    
-    // Reset form state
-    setFormData({
-      title: '',
-      description: '',
-      price: '',
-      inventory: '1'
-    });
-    setSelectedCategory(null);
-    setSelectedCampuses([]);
-    setSelectAllLocations(false);
-    setProductImages([]);
-    
-    // Clean up image preview URLs
-    imagePreviews.forEach(preview => URL.revokeObjectURL(preview));
-    setImagePreviews([]);
-    
-    setSearchQuery('');
-    setShowCategoryDropdown(false);
-    setShowLocationDropdown(false);
-
-    console.log('Product creation completed successfully');
-
-  } catch (error: any) {
-    console.error('Product creation error:', error);
-    setError(error.message);
-  } finally {
-    setLoading(false);
-  }
-};
-/////////////////////////////////////
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1046,8 +1154,8 @@ console.log('Vendor preferences updated successfully');
                   value={formData.inventory}
                   onChange={handleChange}
                   className="w-full px-4 py-4 text-lg border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#9B4819] focus:border-[#9B4819] transition duration-200"
-                    placeholder="0"
-                    min="1"
+                  placeholder="0"
+                  min="1"
                 />
               </div>
             </div>
@@ -1209,7 +1317,7 @@ console.log('Vendor preferences updated successfully');
                                 {campus.university.name} - {campus.name}
                               </div>
                               <div className="text-xs text-gray-500">
-                                 {campus.university.abbreviation}, {campus.city}, {campus.state.name}
+                                {campus.university.abbreviation}, {campus.city}, {campus.state.name}
                               </div>
                             </div>
                           </label>
@@ -1281,7 +1389,7 @@ console.log('Vendor preferences updated successfully');
                           type="button"
                           onClick={() => removeImage(index)}
                           disabled={loading}
-                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-op duration-200 shadow-lg hover:bg-red-600"
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-lg hover:bg-red-600 disabled:opacity-50"
                         >
                           ×
                         </button>

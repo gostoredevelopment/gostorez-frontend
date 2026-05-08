@@ -87,9 +87,115 @@ import {
   ChevronDown,
   ChevronUp,
   Square,
-  SquareStack
+  SquareStack,
+  Star
 } from 'lucide-react';
+import { notificationService } from '../../../services/notificationService';
 import './VendorDashboard.css';
+
+// ========== NOTIFICATION FUNCTIONS ADDED ==========
+const sendOrderStatusNotification = async (
+  userId: string,
+  shopName: string,
+  orderNumber: string,
+  productNames: string,
+  action: 'accepted' | 'rejected'
+) => {
+  try {
+    console.log('📢 Sending notification to customer:', userId);
+    
+    // Get user email from users table using firebase_uid
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('email, name')
+      .eq('firebase_uid', userId)
+      .single();
+
+    if (userError) {
+      console.error('❌ Error fetching user:', userError);
+    }
+
+    const actionEmoji = action === 'accepted' ? '✅' : '❌';
+    const actionText = action === 'accepted' ? 'accepted' : 'rejected';
+    
+    const notificationBody = `${shopName} ${actionText} your order of ${productNames}`;
+    const notificationTitle = `📦 Order ${action === 'accepted' ? 'Accepted' : 'Rejected'}!! ${shopName}`;
+
+    console.log('📢 Notification content:', { title: notificationTitle, body: notificationBody });
+
+    // Prepare notification data - Use 'order' which is in allowed list
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'order',
+      redirect_url: '/user/orders',
+      data: {
+        userId: userId,
+        shopName: shopName,
+        orderNumber: orderNumber,
+        productNames: productNames,
+        action: action,
+        type: 'order_status_update',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    // Add target user (Firebase UID)
+    notificationData.target_user_id = userId;
+
+    // Add email with fallback
+    const SPARE_EMAIL = 'miracleglory2099@gmail.com';
+    if (userData?.email) {
+      notificationData.email = userData.email;
+      console.log('📢 Using user email from users table:', userData.email);
+    } else {
+      notificationData.email = SPARE_EMAIL;
+      console.log('📢 No user email found, using spare email:', SPARE_EMAIL);
+    }
+
+    console.log('📢 Sending notification with data:', JSON.stringify(notificationData, null, 2));
+
+    // Send notification through the service
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ Notification service response:', response);
+    
+    // Create in-app notification
+    if (response && response.success) {
+      const { error: insertError } = await supabase
+        .from('user_notifications')
+        .insert([{
+          user_id: userId,
+          title: notificationTitle,
+          message: notificationBody,
+          type: 'order_update',
+          data: notificationData.data,
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (insertError) {
+        console.error('❌ Error creating user_notification:', insertError);
+      } else {
+        console.log('✅ In-app notification created successfully');
+      }
+    } else {
+      console.warn('⚠️ Notification service returned non-success:', response);
+    }
+
+  } catch (error) {
+    console.error('❌ Error sending customer notification:', error);
+  }
+};
+
+const extractProductNames = (items: any[]): string => {
+  if (!items || items.length === 0) return 'items';
+  if (items.length === 1) return items[0].product_title || 'product';
+  if (items.length === 2) return `${items[0].product_title} and ${items[1].product_title}`;
+  const firstTwo = items.slice(0, 2).map(i => i.product_title).join(', ');
+  return `${firstTwo} and ${items.length - 2} other items`;
+};
+// ========== END NOTIFICATION FUNCTIONS ==========
 
 interface VendorProfile {
   id: string;
@@ -167,8 +273,8 @@ interface OrderItem {
   location_details: any;
   created_at: string;
   updated_at: string;
-  user_status: string; // 'pending', 'received', 'cancelled'
-  vendor_status: string; // 'pending', 'accepted', 'rejected'
+  user_status: string;
+  vendor_status: string;
   rejection_reason?: string;
 }
 
@@ -217,6 +323,18 @@ interface OrderStats {
   rejected: number;
   cancelled: number;
   received: number;
+}
+
+interface Review {
+  id: string;
+  product_id: string;
+  vendor_id: string;
+  user_id: string;
+  user_name: string;
+  rating: number;
+  review_text: string;
+  order_item_id: string;
+  created_at: string;
 }
 
 // Helper functions
@@ -268,6 +386,11 @@ const VendorDashboard: React.FC = () => {
   });
   const [processingOrder, setProcessingOrder] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [selectedShopId, setSelectedShopId] = useState<string | null>(() => {
+    return localStorage.getItem('lastSelectedShopId');
+  });
+  const [reviews, setReviews] = useState<Review[]>([]);
+
   const navigate = useNavigate();
 
   const fetchUserProfile = async (userId: string) => {
@@ -411,6 +534,22 @@ const VendorDashboard: React.FC = () => {
     }
   };
 
+  const fetchReviews = async (vendorId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setReviews(data || []);
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+      setReviews([]);
+    }
+  };
+
   const handleAcceptOrder = async (orderItemId: string) => {
     if (!vendorProfile) return;
     
@@ -430,26 +569,49 @@ const VendorDashboard: React.FC = () => {
       
       const orderItem = orders.find(item => item.id === orderItemId);
       if (orderItem) {
-        const { error: transactionError } = await supabase
-          .from('transactions')
-          .insert({
-            order_id: orderItem.order_id,
-            order_number: orderItem.order_id,
-            product_id: orderItem.product_id,
-            user_id: '',
-            user_name: 'Customer',
-            vendor_id: vendorProfile.id,
-            vendor_name: vendorProfile.shopName,
-            transaction_type: 'order_accepted',
-            amount: orderItem.total_price,
-            description: `Order accepted for ${orderItem.product_title}`,
-            user_status_at_time: orderItem.user_status,
-            vendor_status_at_time: 'accepted',
-            order_created_at: orderItem.created_at,
-            transaction_created_at: new Date().toISOString()
-          });
+        // Get the order to access user_id
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .select('user_id')
+          .eq('id', orderItem.order_id)
+          .single();
 
-        if (transactionError) console.error('Transaction record error:', transactionError);
+        if (orderError) {
+          console.error('Error fetching order:', orderError);
+        } else if (orderData?.user_id) {
+          const { error: transactionError } = await supabase
+            .from('transactions')
+            .insert({
+              order_id: orderItem.order_id,
+              order_number: orderItem.order_id,
+              product_id: orderItem.product_id,
+              user_id: orderData.user_id, // Use user_id from orders table
+              user_name: 'Customer',
+              vendor_id: vendorProfile.id,
+              vendor_name: vendorProfile.shopName,
+              transaction_type: 'order_accepted',
+              amount: orderItem.total_price,
+              description: `Order accepted for ${orderItem.product_title}`,
+              user_status_at_time: orderItem.user_status,
+              vendor_status_at_time: 'accepted',
+              order_created_at: orderItem.created_at,
+              transaction_created_at: new Date().toISOString()
+            });
+
+          if (transactionError) console.error('Transaction record error:', transactionError);
+
+          // ========== NOTIFICATION ADDED HERE ==========
+          const productNames = extractProductNames([orderItem]);
+          // Don't await to not block UI
+          sendOrderStatusNotification(
+            orderData.user_id, // This is the Firebase UID
+            vendorProfile.shopName,
+            orderItem.order_id,
+            productNames,
+            'accepted'
+          );
+          // ========== END NOTIFICATION ==========
+        }
       }
     } catch (error) {
       console.error('Error accepting order:', error);
@@ -487,29 +649,52 @@ const VendorDashboard: React.FC = () => {
         });
 
         if (vendorBalanceError) console.error('Vendor balance update error:', vendorBalanceError);
+
+        // Get the order to access user_id
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .select('user_id')
+          .eq('id', orderItem.order_id)
+          .single();
+
+        if (orderError) {
+          console.error('Error fetching order:', orderError);
+        } else if (orderData?.user_id) {
+          const { error: transactionError } = await supabase
+            .from('transactions')
+            .insert({
+              order_id: orderItem.order_id,
+              order_number: orderItem.order_id,
+              product_id: orderItem.product_id,
+              user_id: orderData.user_id, // Use user_id from orders table
+              user_name: 'Customer',
+              vendor_id: vendorProfile.id,
+              vendor_name: vendorProfile.shopName,
+              transaction_type: 'order_rejected',
+              amount: orderItem.total_price,
+              description: `Order rejected: ${rejectionReason}`,
+              user_status_at_time: orderItem.user_status,
+              vendor_status_at_time: 'rejected',
+              rejection_reason: rejectionReason,
+              order_created_at: orderItem.created_at,
+              transaction_created_at: new Date().toISOString()
+            });
+
+          if (transactionError) console.error('Transaction record error:', transactionError);
+
+          // ========== NOTIFICATION ADDED HERE ==========
+          const productNames = extractProductNames([orderItem]);
+          // Don't await to not block UI
+          sendOrderStatusNotification(
+            orderData.user_id, // This is the Firebase UID
+            vendorProfile.shopName,
+            orderItem.order_id,
+            productNames,
+            'rejected'
+          );
+          // ========== END NOTIFICATION ==========
+        }
       }
-
-      const { error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          order_id: orderItem?.order_id || '',
-          order_number: orderItem?.order_id || '',
-          product_id: orderItem?.product_id || '',
-          user_id: '',
-          user_name: 'Customer',
-          vendor_id: vendorProfile.id,
-          vendor_name: vendorProfile.shopName,
-          transaction_type: 'order_rejected',
-          amount: orderItem?.total_price || 0,
-          description: `Order rejected: ${rejectionReason}`,
-          user_status_at_time: orderItem?.user_status || 'pending',
-          vendor_status_at_time: 'rejected',
-          rejection_reason: rejectionReason,
-          order_created_at: orderItem?.created_at || new Date().toISOString(),
-          transaction_created_at: new Date().toISOString()
-        });
-
-      if (transactionError) console.error('Transaction record error:', transactionError);
 
       await fetchOrders(vendorProfile.id);
       await fetchSupabaseStats(vendorProfile.id);
@@ -571,26 +756,37 @@ const VendorDashboard: React.FC = () => {
 
       if (vendorStatsError) throw vendorStatsError;
 
-      const { error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          order_id: orderItem.order_id,
-          order_number: orderItem.order_id,
-          product_id: orderItem.product_id,
-          user_id: '',
-          user_name: 'Customer',
-          vendor_id: vendorProfile.id,
-          vendor_name: vendorProfile.shopName,
-          transaction_type: 'delivery_completed',
-          amount: orderItem.total_price,
-          description: `Delivery completed for ${orderItem.product_title}`,
-          user_status_at_time: 'received',
-          vendor_status_at_time: 'delivered',
-          order_created_at: orderItem.created_at,
-          transaction_created_at: new Date().toISOString()
-        });
+      // Get the order to access user_id
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('user_id')
+        .eq('id', orderItem.order_id)
+        .single();
 
-      if (transactionError) console.error('Transaction record error:', transactionError);
+      if (orderError) {
+        console.error('Error fetching order:', orderError);
+      } else if (orderData?.user_id) {
+        const { error: transactionError } = await supabase
+          .from('transactions')
+          .insert({
+            order_id: orderItem.order_id,
+            order_number: orderItem.order_id,
+            product_id: orderItem.product_id,
+            user_id: orderData.user_id, // Use user_id from orders table
+            user_name: 'Customer',
+            vendor_id: vendorProfile.id,
+            vendor_name: vendorProfile.shopName,
+            transaction_type: 'delivery_completed',
+            amount: orderItem.total_price,
+            description: `Delivery completed for ${orderItem.product_title}`,
+            user_status_at_time: 'received',
+            vendor_status_at_time: 'delivered',
+            order_created_at: orderItem.created_at,
+            transaction_created_at: new Date().toISOString()
+          });
+
+        if (transactionError) console.error('Transaction record error:', transactionError);
+      }
 
       await fetchOrders(vendorProfile.id);
       await fetchSupabaseStats(vendorProfile.id);
@@ -675,18 +871,30 @@ const VendorDashboard: React.FC = () => {
     }
   };
 
-  const loadInitialData = async (userId: string) => {
+  const loadInitialData = async (userId: string, preferredVendorId?: string | null) => {
     try {
       setLoading(true);
       
       const businesses = await loadVendorBusinesses(userId);
       
       if (businesses.length > 0) {
-        await loadVendorProfile(businesses[0].id);
-        await fetchOrders(businesses[0].id);
-        await fetchTransactions(businesses[0].id);
-        await fetchProductsFromSupabase(businesses[0].id);
-        await fetchSupabaseStats(businesses[0].id);
+        let targetVendorId = preferredVendorId;
+        
+        // If no preferred ID or it's not in the list, use the first shop
+        if (!targetVendorId || !businesses.some(b => b.id === targetVendorId)) {
+          targetVendorId = businesses[0].id;
+        }
+        
+        // Save the selected shop ID
+        localStorage.setItem('lastSelectedShopId', targetVendorId);
+        setSelectedShopId(targetVendorId);
+        
+        await loadVendorProfile(targetVendorId);
+        await fetchOrders(targetVendorId);
+        await fetchTransactions(targetVendorId);
+        await fetchProductsFromSupabase(targetVendorId);
+        await fetchSupabaseStats(targetVendorId);
+        await fetchReviews(targetVendorId);
       } else {
         navigate('/vendor/onboarding');
         return;
@@ -703,7 +911,7 @@ const VendorDashboard: React.FC = () => {
       setCurrentUser(user);
       if (user) {
         await fetchUserProfile(user.uid);
-        await loadInitialData(user.uid);
+        await loadInitialData(user.uid, selectedShopId);
       } else {
         navigate('/signin');
       }
@@ -715,6 +923,9 @@ const VendorDashboard: React.FC = () => {
   useEffect(() => {
     if (vendorProfile && activeTab === 'products') {
       fetchProductsFromSupabase(vendorProfile.id);
+    }
+    if (vendorProfile && activeTab === 'overview') {
+      fetchReviews(vendorProfile.id);
     }
   }, [activeTab, vendorProfile]);
 
@@ -728,16 +939,29 @@ const VendorDashboard: React.FC = () => {
     setShowShopPopup(false);
     
     try {
+      // Save the selected shop ID
+      localStorage.setItem('lastSelectedShopId', vendorId);
+      setSelectedShopId(vendorId);
+      
       await loadVendorProfile(vendorId);
       await fetchOrders(vendorId);
       await fetchTransactions(vendorId);
       await fetchProductsFromSupabase(vendorId);
       await fetchSupabaseStats(vendorId);
+      await fetchReviews(vendorId);
     } catch (error) {
       console.error('Error switching shop:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const navigateToShopSettings = () => {
+    navigate('/vendor/settings');
+  };
+
+  const navigateToBalanceDetails = () => {
+    navigate('/user/dashboard');
   };
 
   if (loading && !vendorProfile) {
@@ -801,7 +1025,7 @@ const VendorDashboard: React.FC = () => {
           
           <button 
             className="vendash-header-btn"
-            onClick={() => navigate('/vendor/settings')}
+            onClick={navigateToShopSettings}
           >
             <Settings size={16} />
           </button>
@@ -862,7 +1086,7 @@ const VendorDashboard: React.FC = () => {
                 </div>
               </div>
               
-              {/* Shop Stats Grid - ADDED BACK */}
+              {/* Shop Stats Grid */}
               <div className="vendash-shop-stats-grid">
                 <div className="vendash-shop-stat-item">
                   <span className="vendash-shop-stat-label-text">
@@ -901,7 +1125,7 @@ const VendorDashboard: React.FC = () => {
           </div>
         </section>
 
-        {/* Balance Overview Section - ADDED BACK */}
+        {/* Balance Overview Section */}
         <section className="vendash-balance-overview-section">
           <h3 className="vendash-section-title-heading">
             <DollarSign size={12} /> Balance Overview
@@ -961,7 +1185,7 @@ const VendorDashboard: React.FC = () => {
           </div>
         </section>
 
-        {/* Tabs Navigation - Orders first */}
+        {/* Tabs Navigation */}
         <nav className="vendash-tabs-navigation">
           <button 
             className={`vendash-tab-button ${activeTab === 'orders' ? 'vendash-tab-button-active' : ''}`}
@@ -1019,7 +1243,10 @@ const VendorDashboard: React.FC = () => {
           )}
 
           {activeTab === 'transactions' && (
-            <TransactionsTab transactions={transactions} />
+            <TransactionsTab 
+              orders={orders}
+              transactions={transactions}
+            />
           )}
 
           {activeTab === 'products' && (
@@ -1055,9 +1282,12 @@ const VendorDashboard: React.FC = () => {
               products={products}
               orderStats={orderStats}
               supabaseStats={supabaseStats}
+              reviews={reviews}
               onAddProduct={() => navigate('/vendor/add-product')}
               onViewProducts={() => setActiveTab('products')}
               onViewOrders={() => setActiveTab('orders')}
+              onNavigateToShopSettings={navigateToShopSettings}
+              onNavigateToBalanceDetails={navigateToBalanceDetails}
             />
           )}
 
@@ -1112,7 +1342,7 @@ const VendorDashboard: React.FC = () => {
                 className="vendash-create-shop-action-button"
                 onClick={() => {
                   setShowShopPopup(false);
-                  navigate('/vendor/onboarding');
+                  navigate('/vendor-onboarding');
                 }}
               >
                 <Plus size={14} /> Create New Shop
@@ -1121,30 +1351,6 @@ const VendorDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Bottom Navigation - Updated with Market and SquareStack icon */}
-      <nav className="bottom-navigation">
-        <button className="nav-button" onClick={() => navigate('/user/dashboard')}>
-          <Home className="nav-icon" size={20} />
-          <span className="nav-label">Home</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/cart')}>
-          <ShoppingCart className="nav-icon" size={20} />
-          <span className="nav-label">Buy</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/market')}>
-          <ShoppingBag className="nav-icon" size={20} />
-          <span className="nav-label">Market</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/favorites')}>
-          <Heart className="nav-icon" size={20} />
-          <span className="nav-label">Favorites</span>
-        </button>
-        <button className="nav-button active">
-          <MessagesSquare className="nav-icon" size={20} />
-          <span className="nav-label">Messages</span>
-        </button>
-      </nav>
     </div>
   );
 };
@@ -1170,6 +1376,7 @@ const OrdersTab: React.FC<{
   onRejectionReasonChange
 }) => {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
 
   const getStatusColor = (vendorStatus: string, userStatus: string) => {
     if (userStatus === 'cancelled') return '#dc2626';
@@ -1183,65 +1390,107 @@ const OrdersTab: React.FC<{
   const getStatusText = (vendorStatus: string, userStatus: string) => {
     if (userStatus === 'cancelled') return 'Cancelled by Buyer';
     if (vendorStatus === 'rejected') return 'Rejected by You';
-    if (vendorStatus === 'accepted' && userStatus === 'received') return 'Ready for Delivery';
+    if (vendorStatus === 'accepted' && userStatus === 'received') return 'Received Successfully!';
     if (vendorStatus === 'accepted') return 'Accepted';
     if (vendorStatus === 'pending') return 'Pending Review';
     return 'Unknown';
   };
 
+  const handleFilterClick = (filter: string) => {
+    if (filter === 'total') {
+      setSelectedFilters([]);
+    } else {
+      setSelectedFilters(prev => {
+        if (prev.includes(filter)) {
+          return prev.filter(f => f !== filter);
+        } else {
+          return [...prev, filter];
+        }
+      });
+    }
+  };
+
+  const filteredOrders = selectedFilters.length > 0 
+    ? orders.filter(order => {
+        if (selectedFilters.includes('pending') && order.vendor_status === 'pending' && order.user_status !== 'cancelled') return true;
+        if (selectedFilters.includes('accepted') && order.vendor_status === 'accepted') return true;
+        if (selectedFilters.includes('rejected') && order.vendor_status === 'rejected') return true;
+        if (selectedFilters.includes('received') && order.user_status === 'received') return true;
+        return false;
+      })
+    : orders;
+
   return (
     <div className="vendash-orders-tab">
-      {/* Order Stats - Icon and text on same line */}
+      {/* Order Stats */}
       <div className="vendash-order-stats-grid">
-        <div className="vendash-order-stat-card">
+        <div 
+          className={`vendash-order-stat-card ${selectedFilters.length === 0 ? 'vendash-order-stat-card-active' : ''}`}
+          onClick={() => handleFilterClick('total')}
+        >
           <div className="vendash-order-stat-content-inline">
             <ClipboardCheck size={12} />
             <span>Total</span>
             <p className="vendash-order-stat-value">{orderStats.total}</p>
           </div>
+          {selectedFilters.length === 0 && <div className="vendash-stat-active-indicator" />}
         </div>
-        <div className="vendash-order-stat-card">
+        <div 
+          className={`vendash-order-stat-card ${selectedFilters.includes('pending') ? 'vendash-order-stat-card-active' : ''}`}
+          onClick={() => handleFilterClick('pending')}
+        >
           <div className="vendash-order-stat-content-inline">
             <AlertTriangle size={12} />
             <span>Pending</span>
             <p className="vendash-order-stat-value">{orderStats.pending}</p>
           </div>
+          {selectedFilters.includes('pending') && <div className="vendash-stat-active-indicator" />}
         </div>
-        <div className="vendash-order-stat-card">
+        <div 
+          className={`vendash-order-stat-card ${selectedFilters.includes('accepted') ? 'vendash-order-stat-card-active' : ''}`}
+          onClick={() => handleFilterClick('accepted')}
+        >
           <div className="vendash-order-stat-content-inline">
             <Check size={12} />
             <span>Accepted</span>
             <p className="vendash-order-stat-value">{orderStats.accepted}</p>
           </div>
+          {selectedFilters.includes('accepted') && <div className="vendash-stat-active-indicator" />}
         </div>
-        <div className="vendash-order-stat-card">
+        <div 
+          className={`vendash-order-stat-card ${selectedFilters.includes('received') ? 'vendash-order-stat-card-active' : ''}`}
+          onClick={() => handleFilterClick('received')}
+        >
           <div className="vendash-order-stat-content-inline">
             <CheckCircle size={12} />
             <span>Received</span>
             <p className="vendash-order-stat-value">{orderStats.received}</p>
           </div>
+          {selectedFilters.includes('received') && <div className="vendash-stat-active-indicator" />}
         </div>
       </div>
 
       {/* Orders List */}
       <div className="vendash-orders-list">
-        {orders.length === 0 ? (
+        {filteredOrders.length === 0 ? (
           <div className="vendash-empty-state-container">
             <div className="vendash-empty-icon-container">
               <ShoppingCart size={24} />
             </div>
-            <h4>No Orders Yet</h4>
-            <p>When customers purchase your products, orders will appear here</p>
+            <h4>No Orders Found</h4>
+            <p>{selectedFilters.length > 0 ? 'Try changing your filters' : 'When customers purchase your products, orders will appear here'}</p>
           </div>
         ) : (
-          orders.map(order => (
+          filteredOrders.map(order => (
             <div key={order.id} className="vendash-order-item">
               <div 
                 className="vendash-order-header"
                 onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
               >
                 <div className="vendash-order-title-section">
-                  <h4 className="vendash-order-product-title">{order.product_title}</h4>
+                  <h4 className="vendash-order-product-title">
+                    {order.product_title} <span className="vendash-order-product-id">(ID: {order.order_id})</span>
+                  </h4>
                   <div 
                     className="vendash-order-status-badge"
                     style={{ backgroundColor: getStatusColor(order.vendor_status, order.user_status) }}
@@ -1262,38 +1511,41 @@ const OrdersTab: React.FC<{
 
               {expandedOrder === order.id && (
                 <div className="vendash-order-details">
-                  {/* Alternating row colors like Excel */}
                   <div className="vendash-order-detail-row vendash-order-detail-row-alt">
                     <span className="vendash-order-detail-label">Order ID:</span>
                     <span className="vendash-order-detail-value">{order.order_id}</span>
                   </div>
                   <div className="vendash-order-detail-row">
+                    <span className="vendash-order-detail-label">Product ID:</span>
+                    <span className="vendash-order-detail-value">{order.product_id}</span>
+                  </div>
+                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
                     <span className="vendash-order-detail-label">Unit Price:</span>
                     <span className="vendash-order-detail-value">{formatPrice(order.unit_price)}</span>
                   </div>
-                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
+                  <div className="vendash-order-detail-row">
                     <span className="vendash-order-detail-label">Quantity:</span>
                     <span className="vendash-order-detail-value">{order.quantity}</span>
                   </div>
-                  <div className="vendash-order-detail-row">
+                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
                     <span className="vendash-order-detail-label">Total Price:</span>
                     <span className="vendash-order-detail-value">{formatPrice(order.total_price)}</span>
                   </div>
-                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
+                  <div className="vendash-order-detail-row">
                     <span className="vendash-order-detail-label">Order Date:</span>
                     <span className="vendash-order-detail-value">{formatDate(order.created_at)}</span>
                   </div>
-                  <div className="vendash-order-detail-row">
+                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
                     <span className="vendash-order-detail-label">Buyer Status:</span>
                     <span className="vendash-order-detail-value">{order.user_status}</span>
                   </div>
-                  <div className="vendash-order-detail-row vendash-order-detail-row-alt">
+                  <div className="vendash-order-detail-row">
                     <span className="vendash-order-detail-label">Your Status:</span>
                     <span className="vendash-order-detail-value">{order.vendor_status}</span>
                   </div>
                   
                   {order.location_details && (
-                    <div className="vendash-order-detail-row">
+                    <div className="vendash-order-detail-row vendash-order-detail-row-alt">
                       <span className="vendash-order-detail-label">Delivery Location:</span>
                       <span className="vendash-order-detail-value">
                         {order.location_details.delivery_location || 'N/A'}
@@ -1368,7 +1620,7 @@ const OrdersTab: React.FC<{
                         ) : (
                           <TruckIcon size={12} />
                         )}
-                        <span>Mark as Delivered</span>
+                        <span>Received Successfully!</span>
                       </button>
                     ) : order.vendor_status === 'accepted' ? (
                       <div className="vendash-waiting-received">
@@ -1387,8 +1639,12 @@ const OrdersTab: React.FC<{
 };
 
 const TransactionsTab: React.FC<{
+  orders: OrderItem[];
   transactions: Transaction[];
-}> = ({ transactions }) => {
+}> = ({ orders, transactions }) => {
+  // Get received orders from the orders array
+  const receivedOrders = orders.filter(order => order.user_status === 'received');
+  
   const getTransactionTypeColor = (type: string) => {
     switch (type) {
       case 'order_accepted': return '#3b82f6';
@@ -1407,39 +1663,62 @@ const TransactionsTab: React.FC<{
     }
   };
 
+  // Combine received orders with relevant transactions
+  const receivedOrderTransactions = receivedOrders.map(order => ({
+    id: `order-${order.id}`,
+    order_id: order.order_id,
+    order_number: order.order_id,
+    amount: order.total_price,
+    description: `Order received for ${order.product_title}`,
+    user_status_at_time: 'received',
+    vendor_status_at_time: order.vendor_status,
+    transaction_created_at: order.updated_at || order.created_at,
+    transaction_type: 'delivery_completed'
+  }));
+
+  // Filter transactions to show only those related to received orders
+  const relevantTransactions = transactions.filter(t => 
+    t.user_status_at_time === 'received' || 
+    t.transaction_type === 'delivery_completed'
+  );
+
+  // Combine and sort by date
+  const allReceivedItems = [...receivedOrderTransactions, ...relevantTransactions]
+    .sort((a, b) => new Date(b.transaction_created_at).getTime() - new Date(a.transaction_created_at).getTime());
+
   return (
     <div className="vendash-transactions-tab">
       <div className="vendash-section-header-row">
         <h3 className="vendash-section-title-heading">Transaction History</h3>
-        <p>View all your financial transactions</p>
+        <p>View all your successfully received orders</p>
       </div>
 
-      {transactions.length === 0 ? (
+      {allReceivedItems.length === 0 ? (
         <div className="vendash-empty-state-container">
           <div className="vendash-empty-icon-container">
             <FileText size={24} />
           </div>
           <h4>No Transactions Yet</h4>
-          <p>Transaction history will appear here when orders are processed</p>
+          <p>When orders are marked as received, they will appear here</p>
         </div>
       ) : (
         <div className="vendash-transactions-list">
-          {transactions.map(transaction => (
-            <div key={transaction.id} className="vendash-transaction-item">
+          {allReceivedItems.map((item, index) => (
+            <div key={item.id || index} className="vendash-transaction-item">
               <div className="vendash-transaction-header">
                 <div className="vendash-transaction-type-section">
                   <div 
-                    className="vendash-transaction-type-badge"
-                    style={{ backgroundColor: getTransactionTypeColor(transaction.transaction_type) }}
+                    className="vendash-transaction-type-badge received"
+                    style={{ backgroundColor: '#10b981' }}
                   >
-                    {getTransactionTypeText(transaction.transaction_type)}
+                    Received Order
                   </div>
-                  <span className="vendash-transaction-order">Order: {transaction.order_number}</span>
+                  <span className="vendash-transaction-order">ID: {item.order_number}</span>
                 </div>
                 <div className="vendash-transaction-amount-section">
-                  <p className="vendash-transaction-amount">{formatPrice(transaction.amount)}</p>
+                  <p className="vendash-transaction-amount">{formatPrice(item.amount)}</p>
                   <span className="vendash-transaction-date">
-                    {formatDate(transaction.transaction_created_at)}
+                    {formatDate(item.transaction_created_at)}
                   </span>
                 </div>
               </div>
@@ -1447,26 +1726,20 @@ const TransactionsTab: React.FC<{
               <div className="vendash-transaction-details">
                 <div className="vendash-transaction-detail-row vendash-transaction-detail-row-alt">
                   <span className="vendash-transaction-detail-label">Description:</span>
-                  <span className="vendash-transaction-detail-value">{transaction.description}</span>
+                  <span className="vendash-transaction-detail-value">
+                    {item.description || 'Order successfully received'}
+                  </span>
                 </div>
                 <div className="vendash-transaction-detail-row">
-                  <span className="vendash-transaction-detail-label">Buyer Status:</span>
-                  <span className="vendash-transaction-detail-value">{transaction.user_status_at_time}</span>
+                  <span className="vendash-transaction-detail-label">Status:</span>
+                  <span className="vendash-transaction-detail-value">
+                    <span className="received-highlight">✓ Received</span>
+                  </span>
                 </div>
                 <div className="vendash-transaction-detail-row vendash-transaction-detail-row-alt">
-                  <span className="vendash-transaction-detail-label">Your Status:</span>
-                  <span className="vendash-transaction-detail-value">{transaction.vendor_status_at_time}</span>
-                </div>
-                <div className="vendash-transaction-detail-row">
                   <span className="vendash-transaction-detail-label">Date:</span>
-                  <span className="vendash-transaction-detail-value">{formatDate(transaction.transaction_created_at)}</span>
+                  <span className="vendash-transaction-detail-value">{formatDate(item.transaction_created_at)}</span>
                 </div>
-                {transaction.rejection_reason && (
-                  <div className="vendash-transaction-detail-row vendash-transaction-detail-row-alt">
-                    <span className="vendash-transaction-detail-label">Rejection Reason:</span>
-                    <span className="vendash-transaction-detail-value">{transaction.rejection_reason}</span>
-                  </div>
-                )}
               </div>
             </div>
           ))}
@@ -1637,7 +1910,9 @@ const ProductsTab: React.FC<{
               
               <div className="vendash-product-info-section">
                 <div className="vendash-product-header">
-                  <h4 className="vendash-product-name">{product.title}</h4>
+                  <h4 className="vendash-product-name">
+                    {product.title}
+                  </h4>
                   <div className="vendash-product-price">
                     {formatPrice(product.price)}
                   </div>
@@ -1709,10 +1984,13 @@ const OverviewTab: React.FC<{
   products: Product[];
   orderStats: OrderStats;
   supabaseStats: any;
+  reviews: Review[];
   onAddProduct: () => void;
   onViewProducts: () => void;
   onViewOrders: () => void;
-}> = ({ vendorProfile, products, orderStats, supabaseStats, onAddProduct, onViewProducts, onViewOrders }) => {
+  onNavigateToShopSettings: () => void;
+  onNavigateToBalanceDetails: () => void;
+}> = ({ vendorProfile, products, orderStats, supabaseStats, reviews, onAddProduct, onViewProducts, onViewOrders, onNavigateToShopSettings, onNavigateToBalanceDetails }) => {
   
   const stats = {
     totalViews: products.reduce((sum, product) => sum + product.views_count, 0),
@@ -1720,7 +1998,8 @@ const OverviewTab: React.FC<{
     totalSales: products.reduce((sum, product) => sum + product.sales_count, 0),
     totalRevenue: products.reduce((sum, product) => sum + (product.price * product.sales_count), 0),
     totalProducts: products.length,
-    activeProducts: products.filter(p => p.is_active).length
+    activeProducts: products.filter(p => p.is_active).length,
+    averageRating: reviews.length > 0 ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0
   };
 
   return (
@@ -1782,6 +2061,7 @@ const OverviewTab: React.FC<{
         </div>
       </div>
 
+      {/* Quick Actions Section - Moved above reviews */}
       <div className="vendash-quick-actions-section">
         <h3 className="vendash-section-title-heading">Quick Actions</h3>
         <div className="vendash-actions-grid-buttons">
@@ -1793,16 +2073,51 @@ const OverviewTab: React.FC<{
             <ShoppingCart size={14} />
             <span>View Orders ({orderStats.pending} pending)</span>
           </button>
-          <button className="vendash-action-button-item" onClick={() => window.location.href = '/vendor/settings'}>
+          <button className="vendash-action-button-item" onClick={onNavigateToShopSettings}>
             <Settings size={14} />
             <span>Shop Settings</span>
           </button>
-          <button className="vendash-action-button-item" onClick={() => window.location.href = '/vendor/balance'}>
+          <button className="vendash-action-button-item" onClick={onNavigateToBalanceDetails}>
             <Wallet size={14} />
             <span>Balance Details</span>
           </button>
         </div>
       </div>
+
+      {/* Reviews Section */}
+      {reviews.length > 0 && (
+        <div className="vendash-reviews-section">
+          <h3 className="vendash-section-title-heading">Recent Reviews</h3>
+          <div className="vendash-reviews-summary">
+            <div className="vendash-average-rating">
+              <Star size={16} fill="#fbbf24" color="#fbbf24" />
+              <span>{stats.averageRating.toFixed(1)}</span>
+              <span className="vendash-total-reviews">({reviews.length} reviews)</span>
+            </div>
+          </div>
+          <div className="vendash-reviews-list">
+            {reviews.slice(0, 3).map(review => (
+              <div key={review.id} className="vendash-review-item">
+                <div className="vendash-review-header">
+                  <span className="vendash-reviewer-name">{review.user_name}</span>
+                  <div className="vendash-review-rating">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star 
+                        key={i} 
+                        size={12} 
+                        fill={i < review.rating ? '#fbbf24' : 'none'} 
+                        color={i < review.rating ? '#fbbf24' : '#d1d5db'}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <p className="vendash-review-text">{review.review_text}</p>
+                <span className="vendash-review-date">{formatDate(review.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="vendash-products-display-section">
         <div className="vendash-section-header-row">

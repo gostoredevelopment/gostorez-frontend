@@ -267,7 +267,7 @@ const SignUp: React.FC = () => {
                   </label>
                 </div>
                 <p className="mt-2 text-xs text-gray-500">
-                  Add a profile picture (optional)
+                  Add a profile picture
                 </p>
               </div>
             </div>
@@ -286,7 +286,7 @@ const SignUp: React.FC = () => {
                   value={formData.name}
                   onChange={handleChange}
                   className="appearance-none block w-full px-3 py-2.5 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#9B4819] focus:border-[#9B4819] transition duration-150 text-sm"
-                  placeholder="Enter your full name"
+                  placeholder="Enter your legal name"
                 />
               </div>
             </div>
@@ -494,7 +494,7 @@ const SignUp: React.FC = () => {
               
               <p className="text-gray-600 mb-4">
                 We've sent a verification link to <strong>{formData.email}</strong>. 
-                Please check your email <strong>or spam folder</strong> and click the link to verify your account.
+                Please check your email <strong>or <u>spam folder</u></strong> and click the link to verify your account.
               </p>
 
               <div className="space-y-3">

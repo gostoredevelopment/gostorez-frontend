@@ -15,6 +15,8 @@ import {
   getDocs,
   serverTimestamp 
 } from 'firebase/firestore';
+import { supabase } from '../../lib/supabaseClient';
+import { notificationService } from '../../services/notificationService';
 import imageCompression from 'browser-image-compression';
 import logo from '../../assets/images/logo.png';
 
@@ -40,6 +42,130 @@ interface ShopCountInfo {
   maxAllowed: number;
 }
 
+// ========== NOTIFICATION FUNCTION ==========
+const sendNewShopNotification = async (
+  shopName: string,
+  shopId: string,
+  ownerName: string
+) => {
+  try {
+    console.log('📢 Sending new shop notification to all users');
+    
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('firebase_uid, email, name')
+      .not('firebase_uid', 'is', null);
+
+    if (usersError) {
+      console.error('❌ Error fetching users:', usersError);
+      return;
+    }
+
+    if (!users || users.length === 0) {
+      console.log('No users found to notify');
+      return;
+    }
+
+    console.log(`📢 Found ${users.length} users to notify`);
+
+    const firebaseUids = users
+      .map(user => user.firebase_uid)
+      .filter(uid => uid && uid.trim() !== '');
+
+    const emails = users
+      .map(user => user.email)
+      .filter(email => email && email.trim() !== '');
+
+    // Enhanced notification messages
+    const notificationTitle = `🛍️ New Shop Alert: ${shopName}`;
+    const notificationBody = `${shopName} is now live on Campus GOSTOREz! Shop owner: ${ownerName}. Check out their amazing products! 🎉`;
+
+    const shortNotificationBody = `${shopName} is now live on GOSTOREz!`;
+
+    console.log('📢 Notification content:', { 
+      title: notificationTitle, 
+      body: notificationBody,
+      shortBody: shortNotificationBody,
+      usersCount: firebaseUids.length,
+      emailsCount: emails.length 
+    });
+
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'vendor',
+      redirect_url: `/shop/${shopId}`,
+      data: {
+        shopId: shopId,
+        shopName: shopName,
+        ownerName: ownerName,
+        type: 'new_shop_launch',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    if (firebaseUids.length > 0) {
+      notificationData.target_user_ids = firebaseUids;
+    }
+
+    if (emails.length > 0) {
+      notificationData.email_list = emails;
+    }
+
+    console.log('📢 Sending notification...');
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ Notification service response:', response);
+    
+    if (response && response.success) {
+      // Create in-app notifications for all users
+      const inAppNotifications = users.map(user => ({
+        user_id: user.firebase_uid,
+        title: notificationTitle,
+        message: shortNotificationBody,
+        type: 'new_shop',
+        data: {
+          shopId: shopId,
+          shopName: shopName,
+          ownerName: ownerName,
+          redirect_url: `/shop/${shopId}`
+        },
+        is_read: false,
+        created_at: new Date().toISOString()
+      }));
+
+      // Insert in batches of 50
+      const batchSize = 50;
+      for (let i = 0; i < inAppNotifications.length; i += batchSize) {
+        const batch = inAppNotifications.slice(i, i + batchSize);
+        const { error: insertError } = await supabase
+          .from('user_notifications')
+          .insert(batch);
+
+        if (insertError) {
+          console.error(`❌ Error creating notifications batch ${i}:`, insertError);
+        } else {
+          console.log(`✅ Created ${batch.length} in-app notifications (batch ${i / batchSize + 1})`);
+        }
+      }
+
+      console.log('✅ All in-app notifications created successfully');
+    }
+
+    console.log('📊 Notification Summary:', {
+      totalUsers: users.length,
+      pushTargets: firebaseUids.length,
+      emailTargets: emails.length,
+      shopName: shopName,
+      shopId: shopId
+    });
+
+  } catch (error) {
+    console.error('❌ Error sending new shop notification:', error);
+  }
+};
+// ========== END NOTIFICATION FUNCTION ==========
+
 const VendorOnboarding: React.FC = () => {
   const [formData, setFormData] = useState<VendorFormData>({
     shopName: '',
@@ -64,6 +190,7 @@ const VendorOnboarding: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userShopCount, setUserShopCount] = useState<ShopCountInfo>({ currentCount: 0, maxAllowed: MAX_SHOPS_PER_USER });
   const [checkingShopCount, setCheckingShopCount] = useState(true);
+  const [userName, setUserName] = useState<string>('');
   const navigate = useNavigate();
 
   // Check authentication state and user's shop count
@@ -72,6 +199,7 @@ const VendorOnboarding: React.FC = () => {
       setCurrentUser(user);
       if (user) {
         await checkUserShopCount(user.uid);
+        await fetchUserName(user.uid);
         setFormData(prev => ({ 
           ...prev, 
           businessEmail: user.email || ''
@@ -83,6 +211,22 @@ const VendorOnboarding: React.FC = () => {
 
     return () => unsubscribe();
   }, []);
+
+  // Fetch user name from Firestore
+  const fetchUserName = async (userId: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setUserName(userData.name || currentUser?.displayName || 'A new vendor');
+      } else {
+        setUserName(currentUser?.displayName || 'A new vendor');
+      }
+    } catch (error) {
+      console.error('Error fetching user name:', error);
+      setUserName(currentUser?.displayName || 'A new vendor');
+    }
+  };
 
   // Check how many shops the user already has
   const checkUserShopCount = async (userId: string) => {
@@ -278,10 +422,42 @@ const VendorOnboarding: React.FC = () => {
 
       await setDoc(doc(db, 'vendors', shopId), vendorData);
 
+      // Also create vendor profile in Supabase for notifications
+      try {
+        const { error: supabaseError } = await supabase
+          .from('vendor_profiles')
+          .insert([{
+            user_id: userId,
+            vendor_id: shopId,
+            shop_name: formData.shopName.trim(),
+            profile_image: profileImage,
+            cover_image: coverImage || null,
+            bio: formData.bio.trim(),
+            is_active: true,
+            onboarding_completed: true,
+            total_products: 0
+          }]);
+
+        if (supabaseError) {
+          console.warn('Could not create Supabase vendor profile:', supabaseError);
+        }
+      } catch (supabaseError) {
+        console.warn('Error creating Supabase vendor profile:', supabaseError);
+      }
+
+      // ========== SEND NOTIFICATIONS ==========
+      // Don't await to not block UI
+      sendNewShopNotification(
+        formData.shopName.trim(),
+        shopId,
+        userName || currentUser.displayName || 'A new vendor'
+      );
+      // ========== END NOTIFICATIONS ==========
+
       // Navigate to vendor dashboard with success state
       navigate('/vendor/dashboard', { 
         state: { 
-          message: 'Shop created successfully!',
+          message: 'Shop created successfully! Notifications sent to all users.',
           shopName: formData.shopName
         }
       });

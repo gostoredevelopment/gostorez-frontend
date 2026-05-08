@@ -1,0 +1,147 @@
+/* Payment.css - Brand colors (#9B4819) with max spacing 3px */
+
+.payment-container {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #f8f9fa;
+  padding: 3px;
+}
+
+.payment-card {
+  background: white;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e0d6cc;
+  padding: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.payment-header {
+  text-align: center;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.payment-header svg {
+  color: #9B4819;
+  margin-bottom: 6px;
+}
+
+.payment-header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 6px 0;
+  color: #9B4819;
+}
+
+.payment-header p {
+  font-size: 10px;
+  color: #666;
+  margin: 0;
+}
+
+.payment-error {
+  background: #fee2e2;
+  border-left: 2px solid #dc2626;
+  padding: 6px 8px;
+  border-radius: 3px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #dc2626;
+  font-size: 10px;
+}
+
+.payment-form {
+  margin-bottom: 12px;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: #333;
+  font-size: 10px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #e0d6cc;
+  border-radius: 3px;
+  font-size: 11px;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  background: white;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #9B4819;
+  box-shadow: 0 0 0 2px rgba(155, 72, 25, 0.1);
+}
+
+.payment-button {
+  width: 100%;
+  background: #9B4819;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.payment-button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.payment-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.payment-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e0d6cc;
+  font-size: 9px;
+  color: #666;
+}
+
+.payment-info p {
+  margin: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.payment-info p::before {
+  content: "✓";
+  color: #10b981;
+  font-weight: bold;
+  font-size: 9px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

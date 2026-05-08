@@ -1,0 +1,149 @@
+.calltest-container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #f5f7fb;
+  min-height: 100vh;
+}
+
+.calltest-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.calltest-header button {
+  background: none;
+  border: none;
+  font-size: 16px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: #1a73e8;
+}
+
+.calltest-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.calltest-card {
+  background: white;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+}
+
+.calltest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.label {
+  color: #666;
+  min-width: 40px;
+}
+
+.value {
+  background: #f0f2f5;
+  padding: 6px 10px;
+  border-radius: 20px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.calltest-input-group {
+  margin-bottom: 16px;
+}
+
+.calltest-input-group label {
+  display: block;
+  font-size: 13px;
+  color: #444;
+  margin-bottom: 4px;
+}
+
+.calltest-input-group input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.calltest-btn.small {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: #f0f2f5;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 16px;
+}
+.status-badge.online { color: #0a7b3c; background: #e6f4ea; }
+.status-badge.offline { color: #a50e0e; background: #fee9e9; }
+
+.calltest-button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.calltest-btn.voice, .calltest-btn.video {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-radius: 30px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.calltest-btn.voice { background: #1a73e8; color: white; }
+.calltest-btn.video { background: #c2185b; color: white; }
+.calltest-btn:disabled { opacity: 0.5; pointer-events: none; }
+
+.calltest-log {
+  background: #1e1e2f;
+  color: #e0e0e0;
+  border-radius: 12px;
+  padding: 12px;
+  font-family: monospace;
+  font-size: 11px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.log-line {
+  border-bottom: 1px solid #333;
+  padding: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-placeholder {
+  color: #888;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.calltest-note {
+  text-align: center;
+  color: #888;
+  font-size: 11px;
+}

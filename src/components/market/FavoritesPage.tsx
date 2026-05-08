@@ -391,7 +391,7 @@ const FavoritesPage: React.FC = () => {
             </p>
             <button
               className="favoritespage-browsebtn"
-              onClick={() => navigate('/marketplace')}
+              onClick={() => navigate('/market')}
             >
               Browse Marketplace
             </button>

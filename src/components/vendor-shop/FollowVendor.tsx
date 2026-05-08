@@ -1,7 +1,128 @@
 import React, { useState, useEffect } from 'react';
 import { getAuth } from 'firebase/auth';
 import { supabase } from '../../lib/supabaseClient';
+import { notificationService } from '../../services/notificationService'; // ADD THIS IMPORT
 import { Check, Plus } from 'lucide-react';
+
+// ========== NOTIFICATION FUNCTIONS ADDED ==========
+const getCurrentUserName = async (): Promise<string> => {
+  const auth = getAuth();
+  const user = auth.currentUser;
+  if (!user) return 'A user';
+
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('name')
+      .eq('firebase_uid', user.uid)
+      .maybeSingle();
+    
+    return data?.name || user.displayName || 'A user';
+  } catch {
+    return user.displayName || 'A user';
+  }
+};
+
+const sendFollowNotification = async (
+  vendorId: string,
+  followerName: string,
+  shopName: string
+) => {
+  try {
+    console.log('📢 Sending follow notification to vendor:', vendorId);
+    
+    // Get vendor details from vendor_profiles table
+    const { data: vendorProfile, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('user_id, business_email, shop_name')
+      .eq('vendor_id', vendorId)
+      .maybeSingle();
+
+    if (vendorError) {
+      console.error('❌ Error fetching vendor profile:', vendorError);
+    }
+
+    if (!vendorProfile) {
+      console.warn('⚠️ No vendor profile found for vendor_id:', vendorId);
+      return;
+    }
+
+    if (!vendorProfile.user_id) {
+      console.warn('⚠️ Vendor has no user_id (Firebase UID)');
+      return;
+    }
+
+    console.log('✅ Found vendor profile:', vendorProfile);
+
+    // Format the message
+    const notificationTitle = `👥 New Follower!! ${vendorProfile.shop_name || shopName || 'Shop'}`;
+    const notificationBody = `${followerName} started following ${vendorProfile.shop_name || shopName || 'you'}`;
+
+    console.log('📢 Notification content:', { title: notificationTitle, body: notificationBody });
+
+    // Prepare notification data
+    const notificationData: any = {
+      title: notificationTitle,
+      body: notificationBody,
+      notification_type: 'vendor',
+      redirect_url: '/vendor/dashboard',
+      data: {
+        vendorId: vendorId,
+        followerName: followerName,
+        shopName: vendorProfile.shop_name || shopName,
+        type: 'new_follower',
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    // Add target user (Firebase UID from vendor_profiles)
+    notificationData.target_user_id = vendorProfile.user_id;
+
+    // Add email with fallback
+    const SPARE_EMAIL = 'miracleglory2099@gmail.com';
+    if (vendorProfile.business_email) {
+      notificationData.email = vendorProfile.business_email;
+      console.log('📢 Using vendor business email:', vendorProfile.business_email);
+    } else {
+      notificationData.email = SPARE_EMAIL;
+      console.log('📢 No vendor email found, using spare email:', SPARE_EMAIL);
+    }
+
+    console.log('📢 Sending notification with data:', JSON.stringify(notificationData, null, 2));
+
+    // Send notification through the service
+    const response = await notificationService.sendNotification(notificationData);
+    
+    console.log('✅ Notification service response:', response);
+    
+    // Create in-app notification
+    if (response && response.success) {
+      const { error: insertError } = await supabase
+        .from('user_notifications')
+        .insert([{
+          user_id: vendorProfile.user_id,
+          title: notificationTitle,
+          message: notificationBody,
+          type: 'follow',
+          data: notificationData.data,
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (insertError) {
+        console.error('❌ Error creating user_notification:', insertError);
+      } else {
+        console.log('✅ In-app notification created successfully');
+      }
+    } else {
+      console.warn('⚠️ Notification service returned non-success:', response);
+    }
+
+  } catch (error) {
+    console.error('❌ Error sending follow notification:', error);
+  }
+};
+// ========== END NOTIFICATION FUNCTIONS ==========
 
 interface FollowVendorProps {
   vendorId: string;
@@ -154,6 +275,12 @@ const FollowVendor: React.FC<FollowVendorProps> = ({
       
       console.log(`✅ Successfully followed ${vendorName || 'vendor'}`);
       
+      // ========== NOTIFICATION ADDED HERE ==========
+      // Get current user name and send notification
+      const followerName = await getCurrentUserName();
+      await sendFollowNotification(vendorId, followerName, vendorProfileData?.shop_name || vendorName || 'Shop');
+      // ========== END NOTIFICATION ==========
+      
       setTimeout(() => setFollowSuccess(false), 3000);
 
     } catch (error: any) {
@@ -221,6 +348,9 @@ const FollowVendor: React.FC<FollowVendorProps> = ({
       onFollowChange?.(false);
       
       console.log(`✅ Successfully unfollowed ${vendorName || 'vendor'}`);
+      
+      // ========== NO NOTIFICATION FOR UNFOLLOW ==========
+      // We don't send notification when someone unfollows
       
       setTimeout(() => setFollowSuccess(false), 3000);
 

@@ -3,6 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { auth } from '../lib/firebase';
 import { supabase } from '../lib/supabaseClient';
 import { format, formatDistanceToNow, parseISO, isValid } from "date-fns";
+
+import { callService } from '../services/callService';
+
 import { 
   ArrowLeft, 
   Send, 
@@ -38,6 +41,7 @@ import {
   BellOff
 } from "lucide-react";
 import "./ChatRoom.css";
+import { notificationService } from '../services/notificationService';
 
 type Message = {
   id: string;
@@ -116,6 +120,50 @@ type Notification = {
   duration?: number;
 };
 
+// Helper function to get Firebase UID from any participant (user or vendor)
+const getParticipantFirebaseUid = async (participantId: string): Promise<string | null> => {
+  try {
+    // First check users table
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('firebase_uid')
+      .eq('id', participantId)
+      .maybeSingle();
+
+    if (!userError && userData?.firebase_uid) {
+      return userData.firebase_uid;
+    }
+
+    // If not found, check if it's a vendor (vendor_profiles id = participantId)
+    const { data: vendorData, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('user_id')
+      .eq('id', participantId)
+      .maybeSingle();
+
+    if (!vendorError && vendorData?.user_id) {
+      // This user_id is the firebase_uid
+      return vendorData.user_id;
+    }
+
+    // Also check if participantId itself is a firebase_uid (direct match)
+    const { data: directUserData, error: directError } = await supabase
+      .from('users')
+      .select('firebase_uid')
+      .eq('firebase_uid', participantId)
+      .maybeSingle();
+
+    if (!directError && directUserData?.firebase_uid) {
+      return directUserData.firebase_uid;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error getting participant Firebase UID:', error);
+    return null;
+  }
+};
+
 export default function ChatRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -175,16 +223,26 @@ export default function ChatRoom() {
   const onlineStatusRef = useRef<NodeJS.Timeout | null>(null);
   const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoScrollRef = useRef<boolean>(true);
+  const initialLoadRef = useRef<boolean>(true);
 
+  // Initialize sounds with error handling
   useEffect(() => {
-    sentSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3');
-    receivedSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
-    typingSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-select-click-1109.mp3');
-    callSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-phone-ring-3002.mp3');
-    
-    [sentSoundRef.current, receivedSoundRef.current, typingSoundRef.current, callSoundRef.current].forEach(audio => {
-      if (audio) audio.volume = 0.3;
-    });
+    // Create audio elements with fallback
+    try {
+      sentSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3');
+      receivedSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
+      typingSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-select-click-1109.mp3');
+      callSoundRef.current = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-phone-ring-3002.mp3');
+      
+      [sentSoundRef.current, receivedSoundRef.current, typingSoundRef.current, callSoundRef.current].forEach(audio => {
+        if (audio) {
+          audio.volume = 0.3;
+          audio.preload = 'auto';
+        }
+      });
+    } catch (e) {
+      console.warn('Could not initialize audio:', e);
+    }
     
     return () => {
       [sentSoundRef.current, receivedSoundRef.current, typingSoundRef.current, callSoundRef.current].forEach(audio => {
@@ -200,32 +258,23 @@ export default function ChatRoom() {
     if (!audioEnabled) return;
     
     try {
+      let audio: HTMLAudioElement | null = null;
       switch(type) {
-        case 'sent':
-          if (sentSoundRef.current) {
-            sentSoundRef.current.currentTime = 0;
-            sentSoundRef.current.play().catch(() => {});
-          }
-          break;
-        case 'received':
-          if (receivedSoundRef.current) {
-            receivedSoundRef.current.currentTime = 0;
-            receivedSoundRef.current.play().catch(() => {});
-          }
-          break;
-        case 'typing':
-          if (typingSoundRef.current) {
-            typingSoundRef.current.currentTime = 0;
-            typingSoundRef.current.play().catch(() => {});
-          }
-          break;
-        case 'call':
-          if (callSoundRef.current) {
-            callSoundRef.current.currentTime = 0;
-            callSoundRef.current.loop = true;
-            callSoundRef.current.play().catch(() => {});
-          }
-          break;
+        case 'sent': audio = sentSoundRef.current; break;
+        case 'received': audio = receivedSoundRef.current; break;
+        case 'typing': audio = typingSoundRef.current; break;
+        case 'call': audio = callSoundRef.current; break;
+      }
+      
+      if (audio) {
+        audio.currentTime = 0;
+        // Create a promise to handle autoplay restrictions
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {
+            // Ignore autoplay errors - will play on user interaction
+          });
+        }
       }
     } catch (error) {
       console.error('Error playing sound:', error);
@@ -360,17 +409,35 @@ export default function ChatRoom() {
         console.log("Could not fetch user details:", userFetchError);
       }
 
-      if (participant.user_type === 'vendor' && participant.firebase_uid) {
+      if (participant.user_type === 'vendor') {
         try {
-          const { data: shopData } = await supabase
+          // For vendors, get the vendor profile using the ID
+          const { data: vendorData } = await supabase
             .from('vendor_profiles')
-            .select('shop_name, profile_image')
-            .eq('user_id', participant.firebase_uid)
+            .select('user_id, shop_name, profile_image')
+            .eq('id', otherParticipantId)
             .maybeSingle();
 
-          if (shopData) {
-            participant.shop_name = shopData.shop_name;
-            participant.avatar_url = shopData.profile_image || participant.avatar_url;
+          if (vendorData) {
+            participant.firebase_uid = vendorData.user_id; // This is the firebase_uid of the shop owner
+            participant.shop_name = vendorData.shop_name;
+            participant.avatar_url = vendorData.profile_image || participant.avatar_url;
+            
+            // Get the shop owner's online status from users table
+            const { data: ownerData } = await supabase
+              .from('users')
+              .select('is_active, last_seen')
+              .eq('firebase_uid', vendorData.user_id)
+              .maybeSingle();
+
+            if (ownerData) {
+              participant.is_online = ownerData.is_active;
+              participant.last_seen = ownerData.last_seen || new Date().toISOString();
+              setOnlineStatus({
+                is_online: ownerData.is_active || false,
+                last_seen: ownerData.last_seen || new Date().toISOString()
+              });
+            }
           }
         } catch (shopError) {
           console.log("Could not fetch shop details:", shopError);
@@ -381,7 +448,6 @@ export default function ChatRoom() {
 
     } catch (error: any) {
       console.error('Error fetching room details:', error);
-      // Don't set error state to avoid disrupting chat flow
       addNotification({
         type: 'error',
         message: 'Failed to load chat details',
@@ -408,6 +474,15 @@ export default function ChatRoom() {
       setMessages(data || []);
       
       await markMessagesAsRead();
+      
+      // Scroll to bottom on initial load after messages are loaded
+      setTimeout(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+          autoScrollRef.current = true;
+        }
+        initialLoadRef.current = false;
+      }, 100);
       
     } catch (error: any) {
       console.error('Error fetching messages:', error);
@@ -536,11 +611,75 @@ export default function ChatRoom() {
       }
 
       playSound('sent');
+
+      // Send comprehensive notification to the other participant
+      if (otherParticipant) {
+        // Get the Firebase UID for the recipient (whether user or vendor)
+        const recipientFirebaseUid = await getParticipantFirebaseUid(otherParticipant.id);
+        
+        if (recipientFirebaseUid) {
+          // Prepare notification data for push and in-app
+          const notificationData: any = {
+            title: `New message from ${otherParticipant.shop_name || otherParticipant.name || 'User'}`,
+            body: messageData.message_text.substring(0, 100),
+            notification_type: 'chat',
+            redirect_url: `/chat/${roomId}`,
+            data: {
+              roomId: roomId,
+              senderId: supabaseUserId,
+              messageId: data.id,
+              messageType: type,
+              timestamp: new Date().toISOString()
+            }
+          };
+
+          // Add target user (Firebase UID)
+          notificationData.target_user_id = recipientFirebaseUid;
+
+          // Also try to get email for email notification if available
+          const { data: userData } = await supabase
+            .from('users')
+            .select('email')
+            .eq('firebase_uid', recipientFirebaseUid)
+            .maybeSingle();
+
+          if (userData?.email) {
+            notificationData.email = userData.email;
+          }
+
+          // Send push notification via OneSignal
+          await notificationService.sendNotification(notificationData)
+            .then(response => {
+              console.log('Push notification sent:', response);
+              
+              // Also create in-app notification in the database
+              if (response.success) {
+                supabase
+                  .from('in_app_notifications')
+                  .insert([{
+                    user_id: recipientFirebaseUid, // Firebase UID
+                    title: notificationData.title,
+                    message: notificationData.body,
+                    type: 'chat',
+                    data: notificationData.data,
+                    is_read: false,
+                    created_at: new Date().toISOString()
+                  }])
+                  .then(({ error }) => {
+                    if (error) console.error('Error creating in-app notification:', error);
+                  });
+              }
+            })
+            .catch(err => console.error('Failed to send push notification:', err));
+        } else {
+          console.warn('Could not find Firebase UID for recipient:', otherParticipant.id);
+        }
+      }
       
       updateRoomStatus('online');
       setIsTyping(false);
       
-      // Only auto-scroll if user is at the bottom
+      // Auto-scroll to bottom after sending if user is at bottom
       if (autoScrollRef.current) {
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -909,57 +1048,7 @@ export default function ChatRoom() {
     setIsSelecting(false);
   };
 
-  const startCall = async (type: CallType) => {
-    if (!roomId || !supabaseUserId || !otherParticipant) return;
-    
-    setActiveCall(type);
-    setCallStatus('ringing');
-    setShowCallOptions(false);
-    
-    playSound('call');
-    
-    try {
-      const callData = {
-        room_id: roomId,
-        caller_id: supabaseUserId,
-        receiver_id: otherParticipant.id,
-        call_type: type,
-        status: 'ringing',
-        created_at: new Date().toISOString()
-      };
-      
-      const { data, error } = await supabase
-        .from('calls')
-        .insert([callData])
-        .select()
-        .single();
-      
-      if (error) throw error;
-      
-      if (callTimerRef.current) clearTimeout(callTimerRef.current);
-      callTimerRef.current = setTimeout(() => {
-        if (callStatus === 'ringing') {
-          endCall();
-          addNotification({
-            type: 'warning',
-            message: 'Call not answered',
-            duration: 3000
-          });
-        }
-      }, 30000);
-      
-    } catch (error) {
-      console.error('Error starting call:', error);
-      setActiveCall(null);
-      setCallStatus('idle');
-      stopCallSound();
-      addNotification({
-        type: 'error',
-        message: 'Failed to start call',
-        duration: 3000
-      });
-    }
-  };
+ 
 
   const answerCall = async () => {
     setCallStatus('connected');
@@ -1097,22 +1186,30 @@ export default function ChatRoom() {
   };
 
   const formatTime = (timestamp: string) => {
-    const date = parseISO(timestamp);
-    return format(date, 'h:mm a');
+    try {
+      const date = parseISO(timestamp);
+      return format(date, 'h:mm a');
+    } catch {
+      return '';
+    }
   };
 
   const formatDate = (timestamp: string) => {
-    const date = parseISO(timestamp);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
+    try {
+      const date = parseISO(timestamp);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
 
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
-      return format(date, 'MMMM d, yyyy');
+      if (date.toDateString() === today.toDateString()) {
+        return 'Today';
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        return 'Yesterday';
+      } else {
+        return format(date, 'MMMM d, yyyy');
+      }
+    } catch {
+      return '';
     }
   };
 
@@ -1179,6 +1276,13 @@ export default function ChatRoom() {
     }
   }, []);
 
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (!loading && messages.length > 0 && autoScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, loading]);
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       setUser(currentUser);
@@ -1233,12 +1337,12 @@ export default function ChatRoom() {
                 playSound('received');
                 markMessagesAsRead();
                 
-                // Auto-scroll for new received messages
-                setTimeout(() => {
-                  if (autoScrollRef.current) {
+                // Auto-scroll for new received messages if user is at bottom
+                if (autoScrollRef.current) {
+                  setTimeout(() => {
                     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                  }
-                }, 100);
+                  }, 100);
+                }
               }
             }
           }
@@ -1548,25 +1652,94 @@ export default function ChatRoom() {
             </>
           ) : (
             <>
-              {callStatus === 'idle' && (
-                <>
-                  <button 
-                    className="chatroom-header-btn"
-                    onClick={() => startCall('voice')}
-                    title="Voice Call"
-                  >
-                    <Phone size={14} />
-                  </button>
-                  
-                  <button 
-                    className="chatroom-header-btn"
-                    onClick={() => startCall('video')}
-                    title="Video Call"
-                  >
-                    <Video size={14} />
-                  </button>
-                </>
-              )}
+
+
+
+{callStatus === 'idle' && (
+  <>
+    {/* Voice Call Button */}
+    <button 
+      className="chatroom-header-btn"
+      onClick={async () => {
+        const btn = document.getElementById('voice-call-btn');
+        if (btn) btn.classList.add('loading');
+        
+        try {
+          const otherId = roomDetails?.p_a === supabaseUserId 
+            ? roomDetails?.p_b 
+            : roomDetails?.p_a;
+          
+          if (!otherId) {
+            addNotification({ type: 'error', message: 'Cannot identify other participant' });
+            if (btn) btn.classList.remove('loading');
+            return;
+          }
+
+          const firebaseUid = await getParticipantFirebaseUid(otherId);
+          
+          if (!firebaseUid) {
+            addNotification({ type: 'error', message: 'Cannot start call: User ID not available' });
+            if (btn) btn.classList.remove('loading');
+            return;
+          }
+
+          navigate(`/call/${firebaseUid}`);
+          
+        } catch (error) {
+          addNotification({ type: 'error', message: 'Failed to start call' });
+          if (btn) btn.classList.remove('loading');
+        }
+      }}
+      title="Voice Call"
+      id="voice-call-btn"
+    >
+      <Phone size={14} />
+      <span className="chatroom-btn-loader"></span>
+    </button>
+    
+    {/* Video Call Button */}
+    <button 
+      className="chatroom-header-btn"
+      onClick={async () => {
+        const btn = document.getElementById('video-call-btn');
+        if (btn) btn.classList.add('loading');
+        
+        try {
+          const otherId = roomDetails?.p_a === supabaseUserId 
+            ? roomDetails?.p_b 
+            : roomDetails?.p_a;
+          
+          if (!otherId) {
+            addNotification({ type: 'error', message: 'Cannot identify other participant' });
+            if (btn) btn.classList.remove('loading');
+            return;
+          }
+
+          const firebaseUid = await getParticipantFirebaseUid(otherId);
+          
+          if (!firebaseUid) {
+            addNotification({ type: 'error', message: 'Cannot start call: User ID not available' });
+            if (btn) btn.classList.remove('loading');
+            return;
+          }
+
+          navigate(`/call/${firebaseUid}`);
+          
+        } catch (error) {
+          addNotification({ type: 'error', message: 'Failed to start video call' });
+          if (btn) btn.classList.remove('loading');
+        }
+      }}
+      title="Video Call"
+      id="video-call-btn"
+    >
+      <Video size={14} />
+      <span className="chatroom-btn-loader"></span>
+    </button>
+  </>
+)}
+
+
               
               {callStatus === 'ringing' && activeCall && (
                 <>

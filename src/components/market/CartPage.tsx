@@ -910,6 +910,12 @@ const CartPage: React.FC = () => {
           <div className="cartpage-empty">
             <ShoppingBag size={32} />
             <p>Your bag is empty</p>
+              <button
+        className="cartpage-browsebtn"
+        onClick={() => navigate('/market')}
+      >
+        Browse Marketplace
+      </button>
           </div>
         ) : (
           <div className="cartpage-itemslist">

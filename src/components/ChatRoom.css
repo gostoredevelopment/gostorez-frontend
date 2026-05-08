@@ -1724,3 +1724,42 @@
     left: 10px;
   }
 }
+
+
+
+
+
+
+
+
+
+
+/* Loading animation - minimal addition */
+.chatroom-header-btn {
+  position: relative;
+}
+
+.chatroom-header-btn .chatroom-btn-loader {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: chatroom-btn-spin 0.6s linear infinite;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.chatroom-header-btn.loading .chatroom-btn-loader {
+  opacity: 1;
+  visibility: visible;
+}
+
+@keyframes chatroom-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -39,7 +39,9 @@ import {
   ShoppingBag,
   AlertCircle,
   RefreshCw,
-  User as UserIcon
+  User as UserIcon,
+  Clock,
+  TrendingUp as TrendingIcon
 } from 'lucide-react';
 
 // Product interface
@@ -187,6 +189,17 @@ interface UserFilterPreferences {
 }
 // === END ADDED ===
 
+// === ADDED: Search History Interface ===
+interface SearchHistory {
+  id: string;
+  user_id: string;
+  search_term: string;
+  created_at: string;
+  frequency?: number;
+  updated_at?: string;
+}
+// === END ADDED ===
+
 // Stack for tracking navigation history
 interface NavigationStackItem {
   type: 'product' | 'vendor';
@@ -194,6 +207,15 @@ interface NavigationStackItem {
   product?: Product;
   timestamp: number;
 }
+
+// === ADDED: Search suggestion types ===
+interface SearchSuggestion {
+  term: string;
+  type: 'recent_user' | 'frequent_user' | 'recent_all' | 'frequent_all';
+  frequency?: number;
+  created_at?: string;
+}
+// === END ADDED ===
 
 const Marketplace: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -205,13 +227,24 @@ const Marketplace: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [showSidebar, setShowSidebar] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   
   // === ADDED: User filter preferences state ===
   const [userFilterPreferences, setUserFilterPreferences] = useState<UserFilterPreferences | null>(null);
+  // === END ADDED ===
+  
+  // === ADDED: Search timeout ref for debouncing ===
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedSearchRef = useRef<string>('');
+  // === END ADDED ===
+
+  // === ADDED: Search suggestions state ===
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
+  const [suggestionsBarVisible, setSuggestionsBarVisible] = useState(true);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
   // === END ADDED ===
   
   // Navigation stack for back/forward functionality
@@ -528,6 +561,260 @@ const Marketplace: React.FC = () => {
   };
   // === END ADDED ===
 
+  // === FIX 1: Updated search history function with frequency increment ===
+  const saveSearch = async (searchTerm: string) => {
+    const user = auth.currentUser;
+    if (!user || !searchTerm.trim() || searchTerm.trim().length < 2) return;
+    
+    const trimmedTerm = searchTerm.trim();
+    
+    // Don't save if it's the same as the last saved search
+    if (lastSavedSearchRef.current === trimmedTerm) return;
+    
+    try {
+      console.log(`🔍 Attempting to save search: "${trimmedTerm}" for user: ${user.uid}`);
+      
+      // Check if this search term already exists for this user
+      const { data: existingSearches, error: searchError } = await supabase
+        .from('search_history')
+        .select('id, search_term, frequency, created_at')
+        .eq('user_id', user.uid)
+        .eq('search_term', trimmedTerm)
+        .maybeSingle();
+
+      if (searchError && searchError.code !== 'PGRST116') {
+        console.error('❌ Error checking existing search:', searchError);
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      if (existingSearches) {
+        // FIX 1: Update frequency and timestamp instead of creating new record
+        const currentFrequency = existingSearches.frequency || 1;
+        console.log(`🟡 Found existing search, increasing frequency from ${currentFrequency} to ${currentFrequency + 1}`);
+        
+        const { error: updateError } = await supabase
+          .from('search_history')
+          .update({ 
+            created_at: now,
+            frequency: currentFrequency + 1,
+            updated_at: now
+          })
+          .eq('id', existingSearches.id);
+
+        if (updateError) {
+          console.error('❌ Error updating search frequency:', updateError);
+        } else {
+          console.log(`✅ Search frequency updated for: "${trimmedTerm}" (now: ${currentFrequency + 1})`);
+          lastSavedSearchRef.current = trimmedTerm;
+          
+          // Reload suggestions after update
+          loadSearchSuggestions();
+        }
+      } else {
+        // Insert new search term with frequency 1
+        console.log(`🟡 No existing search found, creating new entry for: "${trimmedTerm}"`);
+        
+        const { error: insertError } = await supabase
+          .from('search_history')
+          .insert({
+            user_id: user.uid,
+            search_term: trimmedTerm,
+            created_at: now,
+            frequency: 1,
+            updated_at: now
+          });
+
+        if (insertError) {
+          console.error('❌ Error saving search:', insertError);
+        } else {
+          console.log(`✅ New search saved: "${trimmedTerm}" (frequency: 1)`);
+          lastSavedSearchRef.current = trimmedTerm;
+          
+          // Reload suggestions after insert
+          loadSearchSuggestions();
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in saveSearch:', error);
+    }
+  };
+
+  // === FIX 2: Load search suggestions (2+3+2+3) ===
+// === FIX 2: Load search suggestions (5+5+3+3) ===
+const loadSearchSuggestions = async () => {
+  const user = auth.currentUser;
+  
+  try {
+    console.log("📊 Loading search suggestions...");
+    
+    // Get user's recent searches (last 5) - INCREASED FROM 2 TO 5
+    let userRecent: { search_term: string; created_at: string }[] = [];
+    if (user) {
+      const { data: userRecentData } = await supabase
+        .from('search_history')
+        .select('search_term, created_at')
+        .eq('user_id', user.uid)
+        .order('created_at', { ascending: false })
+        .limit(5); // CHANGED FROM 2 TO 5
+      
+      if (userRecentData) {
+        userRecent = userRecentData;
+        console.log(`📊 Found ${userRecent.length} user recent searches`);
+      }
+    }
+
+    // Get user's most frequent searches (top 5) - INCREASED FROM 3 TO 5
+    let userFrequent: { search_term: string; frequency: number }[] = [];
+    if (user) {
+      const { data: userFrequentData } = await supabase
+        .from('search_history')
+        .select('search_term, frequency')
+        .eq('user_id', user.uid)
+        .order('frequency', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(5); // CHANGED FROM 3 TO 5
+      
+      if (userFrequentData) {
+        userFrequent = userFrequentData;
+        console.log(`📊 Found ${userFrequent.length} user frequent searches`);
+      }
+    }
+
+    // Get recent searches from all users (last 3) - INCREASED FROM 2 TO 3
+    const { data: allRecentData } = await supabase
+      .from('search_history')
+      .select('search_term, created_at')
+      .order('created_at', { ascending: false })
+      .limit(3); // CHANGED FROM 2 TO 3
+    
+    if (allRecentData) {
+      console.log(`📊 Found ${allRecentData.length} all recent searches`);
+    }
+
+    // Get most frequent searches overall (top 3) - KEPT AT 3
+    const { data: allFrequentData } = await supabase
+      .from('search_history')
+      .select('search_term, frequency')
+      .order('frequency', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(3); // KEPT AT 3
+    
+    if (allFrequentData) {
+      console.log(`📊 Found ${allFrequentData.length} all frequent searches`);
+    }
+
+    // Combine all suggestions with deduplication
+    const suggestionsMap = new Map<string, SearchSuggestion>();
+
+    // Add user recent (5 items)
+    userRecent.forEach(item => {
+      suggestionsMap.set(`user_recent_${item.search_term}`, {
+        term: item.search_term,
+        type: 'recent_user',
+        created_at: item.created_at
+      });
+    });
+
+    // Add user frequent (5 items)
+    userFrequent.forEach(item => {
+      suggestionsMap.set(`user_frequent_${item.search_term}`, {
+        term: item.search_term,
+        type: 'frequent_user',
+        frequency: item.frequency
+      });
+    });
+
+    // Add all recent (3 items)
+    allRecentData?.forEach(item => {
+      if (!suggestionsMap.has(`user_recent_${item.search_term}`) && 
+          !suggestionsMap.has(`user_frequent_${item.search_term}`)) {
+        suggestionsMap.set(`all_recent_${item.search_term}`, {
+          term: item.search_term,
+          type: 'recent_all',
+          created_at: item.created_at
+        });
+      }
+    });
+
+    // Add all frequent (3 items)
+    allFrequentData?.forEach(item => {
+      if (!suggestionsMap.has(`user_recent_${item.search_term}`) && 
+          !suggestionsMap.has(`user_frequent_${item.search_term}`) &&
+          !suggestionsMap.has(`all_recent_${item.search_term}`)) {
+        suggestionsMap.set(`all_frequent_${item.search_term}`, {
+          term: item.search_term,
+          type: 'frequent_all',
+          frequency: item.frequency
+        });
+      }
+    });
+
+    // Convert map to array - should have up to 5+5+3+3 = 16 items
+    const suggestionsArray = Array.from(suggestionsMap.values());
+    
+    // Optional: Shuffle if you want random order
+    // const shuffledArray = [...suggestionsArray].sort(() => Math.random() - 0.5);
+    
+    console.log(`✅ Loaded ${suggestionsArray.length} search suggestions:`, 
+      suggestionsArray.map(s => `${s.term} (${s.type})`));
+    
+    setSuggestions(suggestionsArray);
+  } catch (error) {
+    console.error('❌ Error loading search suggestions:', error);
+  }
+};
+
+  // Debounced search handler with suggestion loading
+  const handleSearchChange = (value: string) => {
+    // Update filter immediately for UI responsiveness
+    updateFilter('searchQuery', value);
+    
+    // Show suggestions when typing
+    setShowSuggestions(true);
+    
+    // Clear any existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    // Set new timeout to save search after user stops typing (800ms debounce)
+    searchTimeoutRef.current = setTimeout(() => {
+      if (value.trim().length >= 2) {
+        saveSearch(value);
+      }
+    }, 800);
+  };
+
+  // Handle search suggestion click
+  const handleSuggestionClick = (term: string) => {
+    console.log(`🔍 Suggestion clicked: "${term}"`);
+    updateFilter('searchQuery', term);
+    setShowSuggestions(false);
+    saveSearch(term); // Save immediately when clicked
+  };
+
+  // Handle click outside suggestions
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Load suggestions when component mounts and when user changes
+  useEffect(() => {
+    if (currentUser) {
+      loadSearchSuggestions();
+    }
+  }, [currentUser]);
+  // === END ADDED ===
+
   const fetchUserProfile = async (userId: string) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
@@ -588,6 +875,9 @@ const Marketplace: React.FC = () => {
         // === ADDED: Load saved filter preferences ===
         await applySavedFilterPreferences();
         
+        // === ADDED: Load search suggestions ===
+        await loadSearchSuggestions();
+        
       } else {
         setUserProfile(null);
       }
@@ -608,11 +898,20 @@ const Marketplace: React.FC = () => {
           if (!userFilterPreferences) {
             await applySavedFilterPreferences();
           }
+          // Load search suggestions
+          await loadSearchSuggestions();
         }, 500);
       }
     };
     
     initSync();
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -661,7 +960,7 @@ const Marketplace: React.FC = () => {
       
     } catch (err) {
       console.error('Error loading data:', err);
-      setError('Failed to load marketplace data');
+      setError('Failed to load marketplace data try again later');
     } finally {
       setLoading(false);
     }
@@ -1094,15 +1393,6 @@ const Marketplace: React.FC = () => {
   
   };
 
-  const saveSearch = async (searchTerm: string) => {
-  if (!searchTerm.trim() || !auth.currentUser) return;
-  
-  await supabase.from('search_history').insert({
-    user_id: auth.currentUser.uid,
-    search_term: searchTerm.trim()
-  });
-};
-
 // Marketplace.tsx - Add this function inside your component
 const getCartStylesForProducts = async (userUid: string, productIds: string[]): Promise<{ [key: string]: boolean }> => {
   try {
@@ -1432,7 +1722,7 @@ useEffect(() => {
         </div>
         <h3 className="error-title">Unable to load marketplace</h3>
         <p className="error-message">{error}</p>
-        <button className="retry-button" onClick={loadAllData}>
+        <button className="retry-button" onClick={loadAllData} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
           <RefreshCw size={16} />
           Try Again
         </button>
@@ -1487,189 +1777,63 @@ useEffect(() => {
               <div className="search-bar">
                 <Search className="search-icon" size={18} />
                 <input
-  className="search-input"
-  type="text"
-  placeholder="Search products..."
-  value={filters.searchQuery}
-  onChange={async (e) => {
-    const value = e.target.value;
-    updateFilter('searchQuery', value);
-    
-    // Save to database when user types (auto-search)
-    if (value.length >= 2) { // Only save meaningful searches
-      await saveSearch(value);
-    }
-  }}
-/>
+                  className="search-input"
+                  type="text"
+                  placeholder="Search products..."
+                  value={filters.searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onFocus={() => {
+                    console.log("🔍 Search bar focused, showing suggestions");
+                    setShowSuggestions(true);
+                  }}
+                />
                 <div className="search-actions">
+                  {/* FIX 3: Eye icon at RIGHT side next to filter icon */}
                   <button 
-                    className="sort-toggle-button"
-                    onClick={() => setShowSortMenu(!showSortMenu)}
+                    className="suggestion-toggle-button"
+                    onClick={() => {
+                      console.log(`👁️ Toggling suggestions bar: ${!suggestionsBarVisible ? 'ON' : 'OFF'}`);
+                      setSuggestionsBarVisible(!suggestionsBarVisible);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '5px',
+                      borderRadius: '6px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: suggestionsBarVisible ? '#9B4819' : '#ccc',
+                      transition: 'color 0.2s ease'
+                    }}
+                    title={suggestionsBarVisible ? "Hide suggestions" : "Show suggestions"}
                   >
-                    <Filter size={18} />
+                    <Eye size={18} />
                   </button>
+                  
+                  
                 </div>
               </div>
             </div>
 
             <div className="header-actions">
-              <button className="notification-button" onClick={() => window.location.href = '/chats'} >
+              <button 
+                    className="notification-button"
+                    onClick={() => setShowSortMenu(!showSortMenu)}
+                  >
+                    <Filter size={18} />
+                  </button>
+
+              <button className="notification-button" onClick={() => window.location.href = '/notifications'} >
                 <Bell size={20} />
                 {userNotifications.length > 0 && (
                   <span className="notification-badge">{userNotifications.length}</span>
                 )}
               </button>
-              <button 
-                className="menu-button"
-                onClick={() => setShowSidebar(!showSidebar)}
-              >
-                <Menu size={20} />
-              </button>
             </div>
           </div>
         </header>
-
-        {/* =============== SIDEBAR =============== */}
-        {showSidebar && (
-          <div className="sidebar-overlay" onClick={() => setShowSidebar(false)}>
-            <div className="sidebar-menu" onClick={(e) => e.stopPropagation()}>
-              <div className="sidebar-header">
-                <button className="sidebar-close" onClick={() => setShowSidebar(false)}>
-                  <X size={20} />
-                </button>
-                <h3 className="sidebar-title">Menu</h3>
-              </div>
-              
-              <div className="sidebar-content">
-                <button 
-                  className="sidebar-item"
-                  onClick={() => {
-                    navigate('/user/dashboard');
-                    setShowSidebar(false);
-                  }}
-                >
-                  <Home size={20} />
-                  <span>Home</span>
-                </button>
-                
-                <button 
-                  className="sidebar-item"
-                  onClick={() => {
-                    navigate('/favorites');
-                    setShowSidebar(false);
-                  }}
-                >
-                  <Heart size={20} />
-                  <span>Favourites</span>
-                 
-                </button>
-                
-                <button 
-                  className="sidebar-item"
-                  onClick={() => {
-                    navigate('/cart');
-                    setShowSidebar(false);
-                  }}
-                >
-                  <ShoppingCart size={20} />
-                  <span>Cart</span>
-                </button>
-
-
-                {currentUser && (
-                  <button 
-                    className="sidebar-item"
-                    onClick={() => {
-                      navigate('/vendor/dashboard');
-                      setShowSidebar(false);
-                    }}
-                  >
-                    <ShoppingBag size={20} />
-                    <span>My Shop</span>
-                  </button>
-                )}
-                
-                
-                {userProfile?.role !== 'vendor' && currentUser && (
-                  <button 
-                    className="sidebar-item"
-                    onClick={() => {
-                      navigate('/vendor-onboarding');
-                      setShowSidebar(false);
-                    }}
-                  >
-                    <UserIcon size={20} />
-                    <span>Become a Vendor</span>
-                  </button>
-                )}
-                
-                <button 
-                  className="sidebar-item"
-                  onClick={() => {
-                    navigate('/chats');
-                    setShowSidebar(false);
-                  }}
-                >
-                  <MessagesSquare size={20} />
-                  <span>Messages</span>
-                  {userNotifications.length > 0 && (
-                    <span className="sidebar-badge">{userNotifications.length}</span>
-                  )}
-                </button>
-                
-                {currentUser && (
-                  <button 
-                    className="sidebar-item"
-                    onClick={() => {
-                      navigate('/user/dashboard');
-                      setShowSidebar(false);
-                    }}
-                  >
-                    <UserIcon size={20} />
-                    <span>My Account</span>
-                  </button>
-                )}
-                
-                {!currentUser ? (
-                  <button 
-                    className="sidebar-item"
-                    onClick={() => {
-                      navigate('/signin');
-                      setShowSidebar(false);
-                    }}
-                  >
-                    <UserIcon size={20} />
-                    <span>Sign In</span>
-                  </button>
-                ) : (
-                  <button 
-                    className="sidebar-item"
-                    onClick={() => {
-                      auth.signOut();
-                      navigate('/signin');
-                      setShowSidebar(false);
-                    }}
-                  >
-                    <X size={20} />
-                    <span>Sign Out</span>
-                  </button>
-                )}
-                
-                <button 
-                  className="sidebar-item"
-                  onClick={() => {
-                    loadAllData();
-                    setShowSidebar(false);
-                  }}
-                >
-                  <RefreshCw size={20} />
-                  <span>Refresh</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {/* =============== END SIDEBAR =============== */}
 
         {showSortMenu && (
           <div className="dropdown-overlay" onClick={() => setShowSortMenu(false)}>
@@ -2339,29 +2503,92 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Bottom Navigation - Always Visible (you'll handle z-index) */}
-      <nav className="bottom-navigation">
-        <button className="nav-button" onClick={() => navigate('/user/dashboard')}>
-          <Home className="nav-icon" size={20} />
-          <span className="nav-label">Home</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/cart')}>
-          <ShoppingCart className="nav-icon" size={20} />
-          <span className="nav-label">Buy</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/vendor/dashboard')}>
-          <ShoppingBag className="nav-icon" size={20} />
-          <span className="nav-label">Sell</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/favorites')}>
-          <Heart className="nav-icon" size={20} />
-          <span className="nav-label">Favorites</span>
-        </button>
-        <button className="nav-button" onClick={() => navigate('/chats')}>
-          <MessagesSquare className="nav-icon" size={20} />
-          <span className="nav-label">Messages</span>
-        </button>
-      </nav>
+
+
+    {/* FIX 2: Search suggestions bar - ULTRA COMPACT WITH DEBUG LOGS */}
+{(() => {
+  console.log("🔍 SUGGESTIONS BAR RENDER CHECK:");
+  console.log("   showSuggestions:", showSuggestions);
+  console.log("   suggestionsBarVisible:", suggestionsBarVisible);
+  console.log("   suggestions.length:", suggestions.length);
+  console.log("   suggestions data:", suggestions);
+  
+  if (!showSuggestions) {
+    console.log("❌ Not rendering: showSuggestions is false");
+    return null;
+  }
+  
+  if (!suggestionsBarVisible) {
+    console.log("❌ Not rendering: suggestionsBarVisible is false");
+    return null;
+  }
+  
+  if (suggestions.length === 0) {
+    console.log("❌ Not rendering: suggestions array is empty");
+    return null;
+  }
+  
+  console.log("✅ RENDERING suggestions bar with", suggestions.length, "items");
+  
+  return (
+    <div 
+      ref={suggestionsRef}
+      style={{
+        position: 'fixed',
+        top: '39px',
+        left: 0,
+        right: 0,
+        background: '#f0f0f0e5',
+        borderBottom: '1px solid rgba(155, 73, 25, 0.2)',
+        padding: '3px',
+        height: '30px',
+        zIndex: 9999999,
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        WebkitOverflowScrolling: 'touch',
+        whiteSpace: 'nowrap'
+      }}
+    >
+      <div style={{
+        display: 'inline-flex',
+        gap: '3px',
+        alignItems: 'center',
+        height: '100%'
+      }}>
+        {/* Display ALL suggestions */}
+        {suggestions.map((suggestion, index) => {
+          console.log(`   Rendering suggestion ${index}:`, suggestion.term);
+          return (
+            <button
+              key={`${suggestion.type}_${suggestion.term}_${index}`}
+              onClick={() => {
+                console.log(`👆 Suggestion clicked: "${suggestion.term}"`);
+                handleSuggestionClick(suggestion.term);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                background: suggestion.type.includes('user') ? 'rgba(155,72,25,0.1)' : 'rgba(155,72,25,0.05)',
+                border: '1px solid rgba(155,72,25,0.2)',
+                borderRadius: '15px',
+                fontSize: '11px',
+                color: '#333',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                height: '22px',
+                flexShrink: 0
+              }}
+            >
+              {suggestion.term}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+})()}
     </div>
   );
 };

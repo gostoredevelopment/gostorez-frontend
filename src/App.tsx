@@ -22,7 +22,35 @@ import ChatRoom from "./components/ChatRoom";
 import FavoritesPage from './components/market/FavoritesPage';
 import NotificationSystem from './components/NotificationSystem';
 import OneSignal from 'react-onesignal'; 
+import TestNotification from './components/TestNotification';
+import InAppNotification from './components/InAppNotification';
+import './components/InAppNotification.css';
+import { NotificationProvider } from './contexts/NotificationContext';
+import NotificationPage from './components/NotificationPage';
 
+
+import { SidebarProvider } from './contexts/SidebarContext';
+import Sidebar from './components/Sidebar';
+import MenuButton from './components/MenuButton';
+import GlobalSidebar from './components/GlobalSidebar';
+
+import GlobalBottomNav from './components/GlobalBottomNav';
+import UserProfile from './components/user/UserProfile';
+import ShopSettings from './components/vendor/dashboard/ShopSettings';
+import Admin from './components/Admin/Admin';
+
+import { sendbirdService } from './services/sendbirdService';
+import CallTestPage from './components/CallTestPage';
+import CallPage from './components/CallPage';
+import CallLogs from './components/CallLogs';
+import Feedback from './components/Feedback';
+import OpenMarket from './components/OpenMarket/OpenMarket';
+import Money from './components/user/Money';
+import VirtualAccount from './components/VirtualAccount';
+import TemporalAccount from './components/TemporalAccount';
+import Payment from './components/Payment';
+import TransferPayload from './components/TransferPayload';
+import BackendHealthMonitor from './components/BackendHealthMonitor';
 
 // Welcome Page Component
 const WelcomePage: React.FC = () => {
@@ -185,14 +213,62 @@ const WelcomePage: React.FC = () => {
 // Main App Component
 function App() {
 
+
+  // In App.tsx, add useEffect
+useEffect(() => {
+  console.log('📡 Setting up auth listener for Sendbird');
+  
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      console.log('🔄 USER LOGGED IN - Initializing Sendbird for:', user.uid);
+      try {
+        const initialized = await sendbirdService.init(user.uid);
+        console.log(`✅ Sendbird init result:`, initialized);
+        
+        // Set up the global incoming call handler
+        sendbirdService.onIncomingCall = (incomingCall) => {
+          console.log('📞 GLOBAL: Incoming call received from:', incomingCall.caller?.userId);
+          // Store the call
+          sendbirdService.setPendingIncomingCall(incomingCall);
+          // Navigate to call page WITHOUT userId param (callee)
+          // Using window.location for simplicity
+          window.location.href = '/call';
+        };
+        
+      } catch (error) {
+        console.error('❌ Sendbird init error:', error);
+      }
+    }
+  });
+  
+  return unsubscribe;
+}, []);
+
   return (
     <Router>
+
+            <BackendHealthMonitor />
+      
+        <SidebarProvider>
+        {/* Global Sidebar - no props needed */}
+        <GlobalSidebar />
+
+         {/* Global Bottom Navigation - self-contained */}
+        <GlobalBottomNav />
+        
       {/* Global Notification System - always present */}
       <NotificationSystem 
         autoInitialize={true}
         showBell={false} // Hide bell since it will be in page headers
         maxNotifications={100}
       />
+
+       <NotificationSystem 
+          autoInitialize={true}
+          showBell={false}
+          maxNotifications={100}
+        />
+     <InAppNotification />
 
       <Routes>
         <Route path="/signin" element={<SignIn />} />
@@ -222,8 +298,32 @@ function App() {
         <Route path="/chats" element={<ChatList />} />
         <Route path="/chat/:roomId" element={<ChatRoom />} />
         <Route path="/favorites" element={<FavoritesPage />} />
+        <Route path="/test-notification" element={<TestNotification />} />
+        <Route path="/notifications" element={<NotificationPage />} />
+        <Route path="/user/profile" element={<UserProfile />} />
         
+        <Route path="/vendor/settings" element={<ShopSettings />} /> {/* Main settings route */}
+        <Route path="/vendor/shop-settings" element={<ShopSettings />} /> {/* Alternative route */}
+        <Route path="/admin" element={<Admin />} />
+
+     
+        <Route path="/call" element={<CallPage />} />
+        <Route path="/call-test" element={<CallTestPage />} />
+        <Route path="/call/:userId/startcall" element={<CallPage />} />
+        <Route path="/call/:userId" element={<CallPage />} />
+        <Route path="/call-logs" element={<CallLogs />} />
+        <Route path="/feedbacks" element={<Feedback />} />
+        <Route path="/openmarket" element={<OpenMarket />} />
+        <Route path="/money" element={<Money />} /> 
+        <Route path="/virtual-account" element={<VirtualAccount />} />
+        <Route path="/temporal-account" element={<TemporalAccount />} />
+        <Route path="/payment" element={<Payment />} />
+        <Route path="/admin/withdraw" element={<TransferPayload />} />
+ 
+
+
       </Routes>
+      </SidebarProvider>
     </Router>
     
   );

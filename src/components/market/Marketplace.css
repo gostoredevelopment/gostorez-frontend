@@ -962,9 +962,10 @@ body::after {
 
 .vendor-stats {
   display: flex;
-  gap: 5px;
+  gap: 10px;
   font-size: 8px;
-  color: #666;
+  color: #666666;
+  overflow-x: auto;
 }
 
 .vendor-stat {
@@ -1774,3 +1775,8 @@ body::after {
     height: 20px !important;
   }
 }
+
+
+
+/***********************************************************/
+
