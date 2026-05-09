@@ -191,7 +191,7 @@ const TestNotification: React.FC = () => {
     <div className="test-notification-container">
       <div className="test-header">
         <h1><Bell size={24} /> Notification System Test</h1>
-        <p className="subtitle">✅ SIMPLE SERVICE PATTERN - Direct backend calls via service</p>
+        <p className="subtitle">✅ SIMPLE SERVICE PATTERN - Direct backend calls via service.</p>
       </div>
 
       <div className="test-grid">
